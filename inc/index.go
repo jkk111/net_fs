@@ -125,10 +125,18 @@ func load_config() * INCConfig {
 
 func create_router(config * INCConfig) * INCRouter {
   message_chan := make(chan * INCMessage)
+  nodes := make(map[string]*INCNode)
+  records := make(map[string] * MessageRecord)
+  awaiting := make(map[string]chan * INCMessage)
+  handlers := make(map[string]chan * INCMessage)
   router := &INCRouter{
     Id: config.Id,
     Bootstrap: config.Bootstrap,
     mchan: message_chan,
+    nodes: nodes,
+    records: records,
+    awaiting: awaiting,
+    handlers: handlers,
   }
 
   return router
