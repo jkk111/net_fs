@@ -14,7 +14,7 @@ const (
 )
 
 var (
-  bootstrap = []string { "192.168.30.140" }
+  bootstrap = []string { "192.168.30.140:8080/ws" }
   store * filestore.FileStore
   ENOENT = json_error("ENOENT")
   router * inc.INCRouter = inc.NewINCRouter(":8080", bootstrap)

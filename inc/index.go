@@ -249,7 +249,30 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
 
   parsed := ParseMessage(m)
 
-  fmt.Println(parsed)
+  if parsed.Type != "HELLO" {
+    return
+  }
+
+
+  var chello INCHello
+  err = json.Unmarshal(parsed.Message, &chello)
+
+  if err != nil {
+    return
+  }
+
+  id := chello.Id
+
+  shello := INCHello { this.Id }
+  smsg, _ := json.Marshal(shello)
+  message := NewINCMessage("HELLO", false, smsg)
+
+  conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
+  conn.SetReadDeadline(time.Time{})
+
+  node := &INCNode{ id, conn, this.mchan }
+  this.nodes[string(id)] = node
+  go node.handleMessages()
 }
 
 func (this * INCRouter) connect(url string) {
