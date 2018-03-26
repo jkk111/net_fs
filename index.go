@@ -14,9 +14,10 @@ const (
 )
 
 var (
+  bootstrap = []string { "192.168.30.140" }
   store * filestore.FileStore
   ENOENT = json_error("ENOENT")
-  router * inc.INCRouter = inc.NewINCRouter(":8080", nil)
+  router * inc.INCRouter = inc.NewINCRouter(":8080", bootstrap)
 )
 
 func json_error(etype string) []byte {
@@ -294,6 +295,7 @@ func create_server() {
   mux.HandleFunc("/api/unlink", Unlink)
   mux.HandleFunc("/api/mkdir", Mkdir)
   mux.HandleFunc("/api/rmdir", Rmdir)
+  mux.HandleFunc("/ws", router.HandleIncoming)
   fmt.Println(http.ListenAndServe(":8080", mux))
 }
 

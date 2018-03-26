@@ -3,7 +3,9 @@
 package inc
 
 import (
+  "fmt"
   "os"
+  "net/http"
   "io/ioutil"
   "crypto/rand"
   "time"
@@ -15,6 +17,11 @@ const (
   MESSAGE_TYPE = websocket.TextMessage
   CONFIG_PATH = "./config.json"
 )
+
+var upgrader = websocket.Upgrader{
+  ReadBufferSize:  1024,
+  WriteBufferSize: 1024,
+}
 
 type INCMessage struct {
   Id []byte `json:"id"` // Sender ID
@@ -223,12 +230,42 @@ func (this * INCRouter) handleMessages() {
   }
 }
 
-func (this * INCRouter) connect(url string) {
-  conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request) {
+  conn, err := upgrader.Upgrade(w, req, nil)
 
   if err != nil {
     return
   }
+
+
+  conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+  t, m, err := conn.ReadMessage()
+
+  if t != MESSAGE_TYPE || err != nil {
+    return
+  }
+
+  fmt.Println(m)
+
+  parsed := ParseMessage(m)
+
+  fmt.Println(parsed)
+}
+
+func (this * INCRouter) connect(url string) {
+  fmt.Println("Connecting to", url)
+
+  url = fmt.Sprintf("ws://%s", url)
+
+
+  conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+
+  if err != nil {
+    fmt.Println(err)
+    return
+  }
+
+  fmt.Println("Connected\nHandshaking")
 
   chello := INCHello{ this.Id }
   cmsg, _ := json.Marshal(chello)
@@ -257,6 +294,8 @@ func (this * INCRouter) connect(url string) {
   }
 
   id := shello.Id
+
+  fmt.Println("Successful Handshake", id)
 
   conn.SetReadDeadline(time.Time{})
   node := &INCNode{ id, conn, this.mchan }
