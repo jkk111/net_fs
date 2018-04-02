@@ -3,6 +3,7 @@ package filestore
 import(
   "./dumbstore"
   "fmt"
+  "math"
   "os"
   "time"
   "strings"
@@ -12,6 +13,19 @@ import(
 )
 
 const SIZE = 1024 * 1024
+
+type Error struct {
+  Code string
+}
+
+func NewError(code string) * Error {
+  return &Error{code}
+}
+
+var (
+  ENOENT * Error = NewError("ENOENT")
+  ENOTDIR * Error = NewError("ENOTDIR")
+)
 
 type FileStore struct {
   Path string
@@ -29,11 +43,13 @@ type MetaEntry struct {
   Size int64 `json:"size"`
   Mode uint16 `json:"mode"`
   Dir bool `json:"dir"`
+  Invalidated bool `json:"invalidated"`
   Parent string `json:"parent"`
   Accessed int64 `json:"accessed"`
   Created int64 `json:"created"`
   Modified int64 `json:"modified"`
   Chunks []int64 `json:"chunks"`
+  Owner string
 }
 
 func read_file(file string) []byte {
@@ -55,7 +71,7 @@ func read_file(file string) []byte {
 }
 
 func write_file(file string, data []byte) {
-  f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE, 0755)
+  f, err := os.OpenFile(file, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0755)
 
   if err != nil {
     panic(err)
@@ -72,7 +88,11 @@ func load_metadata(name string, id_entries, name_entries map[string]*MetaEntry) 
   }
 
   var entries []*MetaEntry
-  json.Unmarshal(buf, &entries)
+  err := json.Unmarshal(buf, &entries)
+
+  if err != nil {
+    panic(err)
+  }
 
   for _, entry := range entries {
     id_entries[entry.Id] = entry
@@ -110,7 +130,7 @@ func NewFileStore(name string, size int64) * FileStore {
   }
 
   if name_entries["/"] == nil {
-    file_store.CreateFile("/", 16877, true)
+    file_store.CreateFile("/", "*", 16877, true)
   }
 
   return file_store
@@ -120,14 +140,14 @@ func (this * FileStore) Close() {
   this.Save()
 }
 
-func (this *FileStore) CreateFile(name string, mode uint16, dir bool) string {
+func (this *FileStore) CreateFile(name string, user string, mode uint16, dir bool) string {
   if this.NameEntries[name] != nil {
     return this.NameEntries[name].Id
   }
 
   fmt.Printf("Creating (%s)\n", name)
 
-  fmt.Println(this.NameEntries)
+  // fmt.Println(this.NameEntries)
 
   if name == "ROOT" && this.IdEntries["ROOT"] != nil {
     return "ROOT"
@@ -136,7 +156,7 @@ func (this *FileStore) CreateFile(name string, mode uint16, dir bool) string {
   id := uuid.Must(uuid.NewV4()).String()
 
   if name == "ROOT" || name == "/" {
-    fmt.Println("Updating Root ID")
+    // fmt.Println("Updating Root ID")
     id = "ROOT"
     name = "ROOT"
   }
@@ -155,7 +175,7 @@ func (this *FileStore) CreateFile(name string, mode uint16, dir bool) string {
     }
 
     if this.NameEntries[parent] == nil && name != "/" {
-      this.CreateFile(parent, 16877, true)
+      this.CreateFile(parent, user, 16877, true)
     }
 
     if parent == "/" {
@@ -177,11 +197,13 @@ func (this *FileStore) CreateFile(name string, mode uint16, dir bool) string {
     0,
     mode,
     dir,
+    false,
     parent,
     t,
     t,
     t,
     make([]int64, 0),
+    user,
   }
   this.Entries = append(this.Entries, entry)
   this.IdEntries[id] = entry
@@ -253,7 +275,7 @@ func (this * FileStore) Write(id string, position int64, data []byte) {
   written := int64(0)
   chunk, offset, computed_buf := compute_data(position, data)
   chunk = file.Chunks[chunk]
-  fmt.Println("Writing to", chunk, offset)
+  // fmt.Println("Writing to", chunk, offset)
   this.Store.OverwriteOffset(chunk, offset, computed_buf)
   written += int64(len(computed_buf))
 
@@ -266,6 +288,18 @@ func (this * FileStore) Write(id string, position int64, data []byte) {
 
   if overflow > 0 {
     chunk, offset, computed_buf := compute_data(position + written, data[written:])
+
+
+    if chunk >= int64(len(file.Chunks)) {
+      next := this.Store.GetNextAvailable()
+
+      if next == -1 {
+        panic(dumbstore.E_FULL)
+      }
+
+      file.Chunks = append(file.Chunks, next)
+    }
+
     chunk = file.Chunks[chunk]
     this.Store.OverwriteOffset(chunk, offset, computed_buf)
     written += int64(len(computed_buf))
@@ -277,7 +311,7 @@ func (this * FileStore) Write(id string, position int64, data []byte) {
     file.Size = size
   }
   this.Save()
-  fmt.Printf("Wrote %d Bytes\n", written)
+  // fmt.Printf("Wrote %d Bytes\n", written)
 }
 
 func (this * FileStore) Read(id string, position int64, length int64) []byte {
@@ -350,15 +384,54 @@ func (this * FileStore) Unlink(name string) {
 
   delete(this.NameEntries, name)
   delete(this.IdEntries, id)
+  this.Save()
 }
 
-func (this * FileStore) Readdir(name string) []string {
+func (this * FileStore) Truncate(name string, size int64) {
+  if this.NameEntries[name] == nil {
+    return
+  }
+
   file := this.NameEntries[name]
 
-  fmt.Println(name, file.Id, file.Parent, file.Dir, file)
+  // Size in bytes of the blocks needed
+  block_size := int64(math.Ceil(float64(size) / float64(dumbstore.WRITE_SIZE)) * float64(dumbstore.WRITE_SIZE))
+  i := int64(0)
+  for ; (i * dumbstore.WRITE_SIZE) < block_size; i++ {
+    if i < int64(len(file.Chunks)) {
+      continue
+    }
 
-  if file == nil || !file.Dir {
-    return nil
+    next := this.Store.GetNextAvailable()
+
+    if next == -1 {
+      panic(dumbstore.E_FULL)
+    }
+
+    this.Store.Reserve(next)
+  }
+
+  if i < int64(len(file.Chunks)) {
+    for j := i; j < int64(len(file.Chunks)); j++ {
+      this.Store.Free(file.Chunks[i])
+    }
+
+    file.Chunks = file.Chunks[:i]
+  }
+
+  file.Size = size
+  this.Save()
+}
+
+func (this * FileStore) Readdir(name string) (*Error, []string) {
+  file := this.NameEntries[name]
+
+  // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
+
+  if file == nil {
+    return ENOENT, nil
+  } else if !file.Dir {
+    return ENOTDIR, nil
   }
 
   pid := file.Id
@@ -378,7 +451,7 @@ func (this * FileStore) Readdir(name string) []string {
     }
   }
 
-  return contents
+  return nil, contents
 }
 
 func (this * FileStore) Save() {
@@ -386,7 +459,7 @@ func (this * FileStore) Save() {
 }
 
 func main() {
-  fmt.Println("Starting File Store")
+  // fmt.Println("Starting File Store")
   file_store := NewFileStore("data", SIZE)
 
   var id string
@@ -394,7 +467,7 @@ func main() {
   if file_store.NameEntries["Dummy"] != nil {
     id = file_store.NameEntries["Dummy"].Id
   } else {
-    id = file_store.CreateFile("Dummy", 33206, true)
+      id = file_store.CreateFile("Dummy", "*", 33206, true)
   }
 
   file := file_store.IdEntries[id]

@@ -9,4 +9,4 @@ f.seek(seek)
 
 buf = f.read(read)
 
-print(str(buf))
+print(buf)

@@ -175,6 +175,10 @@ func (this * INCRouter) clearRecords() {
   }
 }
 
+func (this * INCRouter) On(evt string, ch chan * INCMessage) {
+  this.handlers[evt] = ch
+}
+
 func (this * INCRouter) Receive() (*INCMessage) {
   return <- this.mchan
 }
@@ -364,4 +368,9 @@ func (this * INCRouter) emit(message * INCMessage) {
 func (this * INCRouter) Emit(message * INCMessage) {
   message.Id = this.Id
   this.emit(message)
+}
+
+func (this * INCRouter) Send(node string, message * INCMessage) {
+  message.Id = this.Id
+  this.nodes[node].Send(message)
 }

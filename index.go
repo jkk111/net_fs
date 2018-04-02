@@ -10,13 +10,16 @@ import (
 )
 
 const (
-  SIZE = 1024 * 1024 * 1024
+  SIZE = 5 * 1024 * 1024 * 1024
 )
 
+// 192.168.30.140:8080/ws
+
 var (
-  bootstrap = []string { "192.168.30.140:8080/ws" }
+  bootstrap = []string {}
   store * filestore.FileStore
   ENOENT = json_error("ENOENT")
+  ENOTDIR = json_error("ENOTDIR")
   router * inc.INCRouter = inc.NewINCRouter(":8080", bootstrap)
 )
 
@@ -27,45 +30,67 @@ func json_error(etype string) []byte {
 
 type ReadRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
   Offset int64 `json:"offset"`
   Length int64 `json:"length"`
 }
 
 type WriteRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
   Offset int64 `json:"offset"`
   Buffer []byte `json:"buffer"`
 }
 
 type CreateRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
   Mode uint16 `json:"mode"`
 }
 
 type StatRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
 }
 
 type UnlinkRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
 }
 
 type RmdirRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
 }
 
 type MkdirRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
   Mode uint16 `json:"mode"`
 }
 
 type RenameRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
   Updated string `json:"updated"`
 }
 
 type ReaddirRequest struct {
   Name string `json:"name"`
+  User string `json:"user"`
+}
+
+type TruncateRequest struct {
+  Name string `json:"name"`
+  User string `json:"user"`
+  Size int64 `json:"size"`
+}
+
+type UTimeNSRequest struct {
+  Name string `json:"name"`
+  User string `json:"user"`
+  Atime int64 `json:"atime"`
+  Mtime int64 `json:"mtime"`
 }
 
 func init() {
@@ -83,8 +108,6 @@ func Read(w http.ResponseWriter, req * http.Request) {
 
   defer req.Body.Close()
 
-  fmt.Printf("%+v\n", request)
-
   name := request.Name
   offset := request.Offset
   length := request.Length
@@ -94,9 +117,15 @@ func Read(w http.ResponseWriter, req * http.Request) {
      return
   }
 
-  id := store.NameEntries[name].Id
+  file := store.NameEntries[name]
+
+  id := file.Id
 
   read := store.Read(id, offset, length)
+
+  if offset + length > file.Size {
+    read = read[:file.Size - offset]
+  }
 
   w.Write(read)
 }
@@ -138,8 +167,9 @@ func Create(w http.ResponseWriter, req * http.Request) {
 
   name := request.Name
   mode := request.Mode
+  user := request.User
 
-  id := store.CreateFile(name, mode, false)
+  id := store.CreateFile(name, user, mode, false)
 
   w.Write([]byte(id))
 }
@@ -203,10 +233,6 @@ func Rename(w http.ResponseWriter, req * http.Request) {
 }
 
 func Readdir(w http.ResponseWriter, req * http.Request) {
-  // msg, _ := ioutil.ReadAll(req.Body)
-
-  // fmt.Println(string(msg))
-
   decoder := json.NewDecoder(req.Body)
   var request ReaddirRequest
   err := decoder.Decode(&request)
@@ -216,10 +242,15 @@ func Readdir(w http.ResponseWriter, req * http.Request) {
   }
 
   name := request.Name
-  contents := store.Readdir(name)
+  e, contents := store.Readdir(name)
 
-  if contents == nil {
-    w.Write(ENOENT)
+  if e != nil {
+    switch e.Code {
+      case "ENOENT":
+        w.Write(ENOENT)
+      case "ENOTDIR":
+        w.Write(ENOTDIR)
+    }
     return
   }
 
@@ -228,8 +259,6 @@ func Readdir(w http.ResponseWriter, req * http.Request) {
   if err != nil {
     panic(err)
   }
-
-  fmt.Println(string(buf), contents)
 
   w.Write(buf)
 }
@@ -261,7 +290,9 @@ func Mkdir(w http.ResponseWriter, req * http.Request) {
     panic(err)
   }
 
-  store.CreateFile(request.Name, 16877, true)
+  user := request.User
+
+  store.CreateFile(request.Name, user, request.Mode, true)
 
   w.Write([]byte("OK"))
 }
@@ -284,6 +315,56 @@ func Rmdir(w http.ResponseWriter, req * http.Request) {
   w.Write([]byte("OK"))
 }
 
+func Truncate( w http.ResponseWriter, req * http.Request) {
+  decoder := json.NewDecoder(req.Body)
+  var request TruncateRequest
+  err := decoder.Decode(&request)
+
+  if err != nil {
+    panic(err)
+  }
+
+
+  store.Truncate(request.Name, request.Size)
+
+
+
+  w.Write([]byte("OK"))
+}
+
+func UTimeNS(w http.ResponseWriter, req * http.Request) {
+  decoder := json.NewDecoder(req.Body)
+  var request UTimeNSRequest
+  err := decoder.Decode(&request)
+
+  if err != nil {
+    panic(err)
+  }
+
+  file := store.NameEntries[request.Name]
+  file.Accessed = request.Atime
+  file.Modified = request.Mtime
+
+  w.Write([]byte("OK"))
+}
+
+func ws_readdir(msg * inc.INCMessage) {
+  _, content := store.Readdir("")
+  buf, err := json.Marshal(content)
+
+  if err != nil {
+    panic(err)
+  }
+
+  response := inc.NewINCMessage("RESPONSE", false, buf)
+  response.Dest = msg.Id
+  response.Rid = msg.Mid
+
+  router.Send(string(msg.Id), response)
+}
+
+func ws_invalidate(msg * inc.INCMessage) {}
+
 func create_server() {
   mux := http.NewServeMux()
   mux.HandleFunc("/api/read", Read)
@@ -295,13 +376,30 @@ func create_server() {
   mux.HandleFunc("/api/unlink", Unlink)
   mux.HandleFunc("/api/mkdir", Mkdir)
   mux.HandleFunc("/api/rmdir", Rmdir)
+  mux.HandleFunc("/api/truncate", Truncate)
+  mux.HandleFunc("/api/utimens", UTimeNS)
   mux.HandleFunc("/ws", router.HandleIncoming)
   fmt.Println(http.ListenAndServe(":8080", mux))
+
+  readdir_chan := make(chan * inc.INCMessage)
+  invalidation_chan := make(chan * inc.INCMessage)
+
+  router.On("READDIR", readdir_chan)
+  router.On("INVALIDATE", invalidation_chan)
+
+  for {
+    select {
+      case msg := <- readdir_chan:
+        go ws_readdir(msg)
+      case msg := <- invalidation_chan:
+        go ws_invalidate(msg)
+    }
+  }
 }
 
 func dev_setup() {
   if store.NameEntries["/Dummy"] == nil {
-    store.CreateFile("/Dummy", 33206, false)
+    store.CreateFile("/Dummy", "*", 33206, false)
   }
   file := store.NameEntries["/Dummy"]
   id := file.Id

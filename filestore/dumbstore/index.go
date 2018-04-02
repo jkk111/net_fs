@@ -14,7 +14,7 @@ var /* Errors */ (
 )
 
 const (
-  WRITE_SIZE int64 = 4096 // This Can Be Changed, But Needs To Be Standardized
+  WRITE_SIZE int64 = 1024 * 256 // This Can Be Changed, But Needs To Be Standardized
   SEEK_MODE int = 0 // Seek From The Start Of The File
 )
 
@@ -64,15 +64,18 @@ func new_fs(handle * os.File, size int64) * FileSystem {
   bytes := ComputeChunks(size) / 8
   size = ComputeSize(size)
 
-  fmt.Printf("Offsetting %d bytes\n", bytes)
+  // fmt.Printf("Offsetting %d bytes\n", bytes)
 
   availability := make([]bool, bytes * 8)
+
+  a_count := 0
+  c_count := 0
 
   fs := &FileSystem{ &sync.Mutex{}, handle, bytes, size, availability }
 
   for i := int64(0); i < bytes; i++ {
     buf := make([]byte, 1)
-    fs.Seek(0)
+    fs.Seek(i)
     fs.handle.Read(buf)
 
     for j := uint64(0); j < 8; j++  {
@@ -82,11 +85,14 @@ func new_fs(handle * os.File, size int64) * FileSystem {
       if val == 0 {
         index := i * 8 + int64(j)
         availability[index] = true
+        a_count ++
       }
+
+      c_count++
     }
   }
 
-  fmt.Println(availability[:8])
+  // fmt.Println(a_count, c_count, availability[:8], len(availability))
 
   return fs
 }
@@ -148,10 +154,10 @@ func (this * FileSystem) Resize(size int64) {
   lower := this.LowerBoundChunk()
   upper := this.UpperBoundChunk()
 
-  byte_count := (upper - lower + 1) * WRITE_SIZE
+  // byte_count := (upper - lower + 1) * WRITE_SIZE
 
-  fmt.Printf("Need To Move Chunks %d - %d (%d Bytes)\n", lower, upper, byte_count)
-  fmt.Printf("Resizing From %d Bytes to %d Bytes\n", this.size, size)
+  // fmt.Printf("Need To Move Chunks %d - %d (%d Bytes)\n", lower, upper, byte_count)
+  // fmt.Printf("Resizing From %d Bytes to %d Bytes\n", this.size, size)
 
   tmp := create_fs(this.handle.Name() + ".tmp", size)
 
@@ -185,7 +191,7 @@ func New(path string, max_size int64) * FileSystem {
 // Creates a filesystem of size max_size, if already exists ignores the size
 func create_fs(path string, max_size int64) * FileSystem {
   var handle * os.File
-  stat, e := os.Stat(path)
+  _, e := os.Stat(path)
   if e != nil {
     if os.IsNotExist(e) {
       f, e := os.Create(path)
@@ -201,7 +207,7 @@ func create_fs(path string, max_size int64) * FileSystem {
       panic(e)
     }
   } else {
-    fmt.Printf("%+v\n", stat)
+    // fmt.Printf("%+v\n", stat)
     f := openFileSystem(path)
     handle = f
   }
@@ -240,7 +246,7 @@ func (this * FileSystem) GetNextAvailable() int64 {
     buf = buf[:n]
 
     for ci, c := range(buf) {
-      fmt.Println("Current", c, ci)
+      // fmt.Println("Current", c, ci)
       if c < 0xff {
         bit := get_bit(c)
 
@@ -255,7 +261,7 @@ func (this * FileSystem) GetNextAvailable() int64 {
     i += int64(len(buf))
   }
 
-  fmt.Println("Failed", i, this.offset)
+  // fmt.Println("Failed", i, this.offset)
 
   return -1 // Failure condition
 }
@@ -266,15 +272,15 @@ func (this * FileSystem) Seek(offset int64) {
 
 
 func (this * FileSystem) Reserve(chunk int64) {
-  fmt.Println("Reserving Chunk", chunk)
+  // fmt.Println("Reserving Chunk", chunk)
   c_byte := chunk / 8
   c_offset := byte(chunk % 8)
 
-  fmt.Printf("Reserving Byte: %d Bit: %d\n", c_byte, c_offset)
+  // fmt.Printf("Reserving Byte: %d Bit: %d\n", c_byte, c_offset)
 
   mask := byte(0x80 >> c_offset)
 
-  fmt.Println("Mask", mask)
+  // fmt.Println("Mask", mask)
 
   this.Seek(c_byte)
   buf := make([]byte, 1)
@@ -283,7 +289,7 @@ func (this * FileSystem) Reserve(chunk int64) {
   curr = curr | mask
   buf[0] = curr
 
-  fmt.Printf("Buffer %d, Current %d, Mask %d\n", buf[0], curr, mask)
+  // fmt.Printf("Buffer %d, Current %d, Mask %d\n", buf[0], curr, mask)
 
   this.handle.Seek(-1, 1) // We seek backwards here rather than going from the start of the file again!
   this.handle.Write(buf)
@@ -329,7 +335,7 @@ func (this * FileSystem) Write(data []byte) []int64 {
     start := i * WRITE_SIZE
     end := start + WRITE_SIZE
 
-    fmt.Printf("Writing %d bytes to %d\n", end - start, chunk)
+    // fmt.Printf("Writing %d bytes to %d\n", end - start, chunk)
 
     if end > l {
       end = l
@@ -383,14 +389,14 @@ func compute_real_offset(offset int64) int64 {
   tmp_ws := float64(WRITE_SIZE)
 
   computed := int64(math.Ceil(tmp / tmp_ws)) * WRITE_SIZE
-  fmt.Println("Real Offset", computed)
+  // fmt.Println("Real Offset", computed)
   return computed
 }
 
 func (this * FileSystem) write(offset int64, data []byte) WriteRecord {
   offset = compute_real_offset(offset)
   this.handle.Seek(offset, 0)
-  fmt.Println(this.handle.Write(data))
+  // fmt.Println(this.handle.Write(data))
 
   wr := WriteRecord{ Chunk: offset / WRITE_SIZE }
 
