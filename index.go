@@ -514,7 +514,7 @@ func node_connected (node * inc.INCNode) {
   fmt.Println("Node Connected, Sending File List")
   files := store.Serialize()
   message := inc.NewINCMessage("CONNECTLIST", false, files)
-  node.Send(message)
+  router.Send(string(node.Id), message)
 }
 
 func ws_connect_list(m * inc.INCMessage) {
