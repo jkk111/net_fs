@@ -547,7 +547,10 @@ func ws_read(m * inc.INCMessage) {
     data = read(file.Id, offset, length)
   }
 
-  fmt.Println("TODO: Missing Response", data)
+  msg := inc.NewINCMessage("READ_RESPONSE", false, data)
+  msg.Rid = m.Mid
+
+  router.Send(string(m.Id), msg)
 }
 
 func create_server() {
