@@ -575,24 +575,43 @@ func (this * FileStore) Readdir(name string, user string) (*Error, []string) {
     return ENOTDIR, nil
   }
 
-  pid := file.Id
+  local_files := this.Entries.Users[user].DirEntries[name]
+  remote_files := make([]*MetaEntry, 0)
 
-  contents := make([]string, 0)
-
-  for _, entry := range this.Entries.Entries {
-    if entry.Parent == pid && entry.Id != "ROOT" {
-      contents = append(contents, entry.Name)
+  for _, entries := range this.Remote {
+    if entries.Users[user].DirEntries[name] != nil {
+      remote_files = append(remote_files, entries.Users[user].DirEntries[name]...)
     }
   }
 
-  for i, entry := range contents {
-    index := strings.LastIndex(entry, "/")
-    if index > -1 {
-      contents[i] = entry[index + 1:]
+  de_duped := make([]*MetaEntry, len(local_files) + len(remote_files)) // Faster to alloc big and relase later
+
+  copy(de_duped, local_files)
+
+  base_index := len(local_files)
+
+  for _, item := range remote_files {
+    unique := true
+    for _, existing := range de_duped[:base_index] {
+      if item.Id == existing.Id {
+        unique = false
+        break
+      }
+    }
+
+    if unique {
+      de_duped[base_index] = item
+      base_index++
     }
   }
 
-  return nil, contents
+  names := make([]string, base_index)
+
+  for i, item := range de_duped {
+    names[i] = item.Name
+  }
+
+  return nil, names
 }
 
 func (this * FileStore) Save() {

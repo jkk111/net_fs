@@ -170,6 +170,16 @@ func read(id string, offset, length int64) []byte {
   return read
 }
 
+func write(id string, offset int64, buf []byte) {
+  store.Write(id, offset, buf)
+}
+
+func write_remote(remote string, write_request WriteRequest) {
+  request := Serialize(write_request)
+  message := inc.NewINCMessage("WRITE", false, request)
+  router.Send(remote, message)
+}
+
 func read_remote(remote string, read_request ReadRequest) []byte {
   request := Serialize(read_request)
   message := inc.NewINCMessage("READ", false, request)
@@ -231,8 +241,11 @@ func Write(w http.ResponseWriter, req * http.Request) {
   }
 
   id := file.Id
-
-  store.Write(id, offset, buffer)
+  if file.Remote {
+    write_remote(file.RemoteHost, request)
+  } else {
+    write(id, offset, buffer)
+  }
 
   w.Write([]byte("OK"))
 }
@@ -473,23 +486,6 @@ func MessageFromBuf(buf []byte, iface interface{}) {
   }
 }
 
-func ws_readdir(msg * inc.INCMessage) {
-  var request ReaddirRequest
-  MessageFromBuf(msg.Message, &request)
-  _, content := store.Readdir(request.Name, request.User)
-  buf, err := json.Marshal(content)
-
-  if err != nil {
-    panic(err)
-  }
-
-  response := inc.NewINCMessage("RESPONSE", false, buf)
-  response.Dest = msg.Id
-  response.Rid = msg.Mid
-
-  router.Send(string(msg.Id), response)
-}
-
 func ws_invalidate(msg * inc.INCMessage) {
   var request InvalidationRequest
   MessageFromBuf(msg.Message, &request)
@@ -553,6 +549,29 @@ func ws_read(m * inc.INCMessage) {
   router.Send(string(m.Id), msg)
 }
 
+func ws_write(m * inc.INCMessage) {
+  var request WriteRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file == nil {
+    panic("Broke")
+  }
+
+  offset := request.Offset
+  buffer := request.Buffer
+
+  if file.Remote {
+    write_remote(file.RemoteHost, request)
+  } else {
+    write(file.Id, offset, buffer)
+  }
+}
+
 func create_server() {
   mux := http.NewServeMux()
   mux.HandleFunc("/api/read", Read)
@@ -572,16 +591,21 @@ func create_server() {
 
   go listen(mux)
 
+  write_chan := make(chan * inc.INCMessage)
   read_chan := make(chan * inc.INCMessage)
-  readdir_chan := make(chan * inc.INCMessage)
   invalidation_chan := make(chan * inc.INCMessage)
   unlink_chan := make(chan * inc.INCMessage)
   connectlist_chan := make(chan * inc.INCMessage)
 
+  // Can Request Across Other Nodes
   router.On("READ", read_chan)
-  router.On("READDIR", readdir_chan)
-  router.On("INVALIDATE", invalidation_chan)
+  router.On("WRITE", write_chan)
   router.On("UNLINK", unlink_chan)
+
+  // Invalidate cache
+  router.On("INVALIDATE", invalidation_chan)
+
+  //Init
   router.On("CONNECTLIST", connectlist_chan)
   router.OnConnect(node_connected)
 
@@ -591,8 +615,6 @@ func create_server() {
 
   for {
     select {
-      case msg := <- readdir_chan:
-        go ws_readdir(msg)
       case msg := <- invalidation_chan:
         go ws_invalidate(msg)
       case msg := <- unlink_chan:
@@ -601,6 +623,8 @@ func create_server() {
         go ws_connect_list(msg)
       case msg := <- read_chan:
         go ws_read(msg)
+      case msg := <- write_chan:
+        go ws_write(msg)
     }
   }
 }
