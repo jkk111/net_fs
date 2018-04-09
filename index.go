@@ -17,11 +17,11 @@ const (
 // 192.168.30.140:8080/ws
 
 var (
-  bootstrap = []string {}
+  bootstrap = []string { "john-kevin.me:8090" }
   store * filestore.FileStore
   ENOENT = json_error("ENOENT")
   ENOTDIR = json_error("ENOTDIR")
-  router * inc.INCRouter = inc.NewINCRouter(":8080", bootstrap)
+  router * inc.INCRouter = inc.NewINCRouter(":8080")
 )
 
 func json_error(etype string) []byte {
@@ -482,6 +482,7 @@ func listen(mux * http.ServeMux) {
 // func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
 
 func node_connected (node * inc.INCNode) {
+  fmt.Println("Node Connected, Sending File List")
   files := store.Serialize()
   message := inc.NewINCMessage("CONNECTLIST", false, files)
   node.Send(message)
@@ -521,6 +522,8 @@ func create_server() {
   router.On("UNLINK", unlink_chan)
   router.On("CONNECTLIST", connectlist_chan)
   router.OnConnect(node_connected)
+
+  router.BootstrapNodes(bootstrap)
 
   for {
     select {

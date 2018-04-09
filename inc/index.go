@@ -149,24 +149,28 @@ func create_router(config * INCConfig) * INCRouter {
   return router
 }
 
-func NewINCRouter(port string, bootstrap []string) * INCRouter {
+func NewINCRouter(port string) * INCRouter {
   config := load_config()
   router := create_router(config)
+  return router
+}
+
+func (this * INCRouter) BootstrapNodes(bootstrap []string) {
   for _, node := range bootstrap {
     exists := false
-    for _, bootstrapped := range router.Bootstrap {
+    for _, bootstrapped := range this.Bootstrap {
       if bootstrapped == node {
         exists = true
       }
     }
 
     if !exists {
-      router.connect(node)
-      router.Bootstrap = append(router.Bootstrap, node)
+      this.connect(node)
+      this.Bootstrap = append(this.Bootstrap, node)
     }
   }
-  return router
 }
+
 
 // I could map out all nodes + paths or I could just check if I've already received this message
 // More memory to store message ids and timestamps, less CPU
@@ -204,7 +208,7 @@ func (this * INCNode) Send(message * INCMessage) {
 
 func (this * INCNode) handleMessages() {
   // TODO()
-
+  fmt.Println("here", len(this.router.connection_listeners))
   for _, ln := range this.router.connection_listeners {
     ln(this)
   }
@@ -306,7 +310,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
 func (this * INCRouter) connect(url string) {
   fmt.Println("Connecting to", url)
 
-  url = fmt.Sprintf("ws://%s", url)
+  url = fmt.Sprintf("ws://%s/ws", url)
 
 
   conn, _, err := websocket.DefaultDialer.Dial(url, nil)
