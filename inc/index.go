@@ -7,10 +7,10 @@ import (
   "os"
   "net/http"
   "io/ioutil"
-  "crypto/rand"
   "time"
   "encoding/json"
   "github.com/gorilla/websocket"
+  "github.com/satori/go.uuid"
 )
 
 const (
@@ -95,9 +95,7 @@ func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
 }
 
 func random_id() []byte {
-  buf := make([]byte, 32)
-  rand.Read(buf)
-  return buf
+  return []byte(uuid.Must(uuid.NewV4()).String())
 }
 
 func load_default_config() * INCConfig {
