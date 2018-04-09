@@ -203,7 +203,7 @@ func Read(w http.ResponseWriter, req * http.Request) {
   var data []byte
 
   if file.Remote {
-    data = read_remote(file.Id, request)
+    data = read_remote(file.RemoteHost, request)
   } else {
     data = read(file.Id, offset, length)
   }
