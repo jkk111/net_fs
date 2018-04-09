@@ -139,28 +139,28 @@ func Serialize(iface interface{}) []byte {
   return buf
 }
 
-func read(request ReadRequest) []byte {
-  name := request.Name
-  offset := request.Offset
-  length := request.Length
-  version := request.Version
-  user := request.User
+// func read(request ReadRequest) []byte {
+//   name := request.Name
+//   offset := request.Offset
+//   length := request.Length
+//   version := request.Version
+//   user := request.User
 
-  store.CreateUser(user)
+//   store.CreateUser(user)
 
-  if store.Users[user].NameEntries[name] == nil {
-    return ENOENT
-  }
+//   if store.Users[user].NameEntries[name] == nil {
+//     return ENOENT
+//   }
 
-  file := store.Users[user].NameEntries[name]
+//   file := store.Users[user].NameEntries[name]
 
-  if file.Invalidated || file.Version < version {
-    // Reach Out To Network For Valid Version
-  }
+//   if file.Invalidated || file.Version < version {
+//     // Reach Out To Network For Valid Version
+//   }
 
-  store.Read(file.Id, offset, length)
-  return nil // TODO
-}
+//   store.Read(file.Id, offset, length)
+//   return nil // TODO
+// }
 
 func Read(w http.ResponseWriter, req * http.Request) {
   var request ReadRequest
@@ -170,14 +170,13 @@ func Read(w http.ResponseWriter, req * http.Request) {
   offset := request.Offset
   length := request.Length
   user := request.User
+  file := store.LatestName(user, name)
 
-  if store.Users[user].NameEntries[name] == nil {
+  if file == nil {
     w.WriteHeader(http.StatusNotFound)
     w.Write(ENOENT)
     return
   }
-
-  file := store.Users[user].NameEntries[name]
 
   id := file.Id
 
@@ -218,7 +217,7 @@ func Write(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(user)
 
-  file := store.Users[user].NameEntries[name]
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write([]byte(ENOENT))
@@ -253,7 +252,10 @@ func Stat(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(request.User)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write(ENOENT)
@@ -269,18 +271,24 @@ func Rename(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(request.User)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write(ENOENT)
   } else {
-    if store.Users[request.User].NameEntries[request.Updated] != nil {
+    if store.LatestName(user, name) != nil {
       store.Unlink(request.Updated)
     }
 
-    store.Users[request.User].NameEntries[request.Updated] = file
-    delete(store.Users[request.User].NameEntries, request.Name)
+    // store.Users[request.User].NameEntries[request.Updated] = file
+
     file.Name = request.Updated
+    store.Entries.Remove(file.Id)
+    store.Entries.Add(file)
+
     w.Write([]byte("OK"))
     store.Save()
   }
@@ -320,11 +328,12 @@ func Unlink(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(request.User)
 
+  user := request.User
   name := request.Name
 
-  if store.Users[request.User].NameEntries[name] != nil {
-    file := store.Users[request.User].NameEntries[name]
-    delete(store.Users[request.User].NameEntries, name)
+  file := store.LatestName(user, name)
+
+  if file != nil {
     store.Unlink(file.Id)
   }
 
@@ -349,7 +358,10 @@ func Rmdir(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(request.User)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file != nil && file.Dir {
     store.Unlink(request.Name)
@@ -376,7 +388,10 @@ func UTimeNS(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(request.User)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write(ENOENT)
@@ -393,7 +408,11 @@ func Append(w http.ResponseWriter, req * http.Request) {
 
   fmt.Printf("Append Request %+v\n", request)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write(ENOENT)
@@ -407,7 +426,11 @@ func Peak(w http.ResponseWriter, req * http.Request) {
   var request PeakRequest
   MessageFromStream(req.Body, &request)
 
-  file := store.Users[request.User].NameEntries[request.Name]
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
 
   if file == nil {
     w.Write(ENOENT)
@@ -489,8 +512,9 @@ func node_connected (node * inc.INCNode) {
 }
 
 func ws_connect_list(m * inc.INCMessage) {
-  remote := string(m.Message)
-  fmt.Println("Received Message", remote)
+  fmt.Println("Received Message", m)
+
+  store.ParseRemote(string(m.Id), m.Message)
 }
 
 func create_server() {

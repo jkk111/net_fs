@@ -33,13 +33,114 @@ type UserEntries struct {
   DirEntries map[string][]*MetaEntry
 }
 
+type EntrySet struct {
+  Entries []*MetaEntry
+  IsRemote bool
+  RemoteId string
+  IdEntries map[string]*MetaEntry
+  Users map[string]*UserEntries
+}
+
+func (this * EntrySet) Add(entry * MetaEntry) {
+  p := entry.Parent
+  name := entry.Name
+  id := entry.Id
+  user := entry.Owner
+
+  if this.IsRemote {
+    entry.RemoteHost = this.RemoteId
+    entry.Remote = true
+  }
+
+  this.Entries = append(this.Entries, entry)
+  this.IdEntries[id] = entry
+  this.Users[user].IdEntries[id] = entry
+  this.Users[user].NameEntries[name] = entry
+  this.Users[user].DirEntries[p] = append(this.Users[user].DirEntries[p], entry)
+}
+
+func (this * EntrySet) Remove(id string) {
+  entry := this.IdEntries[id]
+
+  if entry == nil {
+    return
+  }
+
+  delete(this.IdEntries, id)
+
+  for i, e := range this.Entries {
+    if e.Id == id {
+      this.Entries = append(this.Entries[:i], this.Entries[i+1:]...)
+      break
+    }
+  }
+
+  user := entry.Owner
+  name := entry.Name
+  p := entry.Parent
+
+  delete(this.Users[user].NameEntries, name)
+  delete(this.Users[user].IdEntries, id)
+  for i, e := range this.Users[user].DirEntries[p] {
+    if e.Id == id {
+      this.Users[user].DirEntries[p] = append(this.Users[user].DirEntries[p][:i], this.Users[user].DirEntries[p][i+1:]...)
+      break
+    }
+  }
+}
+
+func NewEntrySet(entries []*MetaEntry, remote bool) * EntrySet {
+  set := &EntrySet{ Entries: entries, IsRemote: remote }
+
+
+  id_entries := make(map[string]*MetaEntry)
+  user_entries := make(map[string]*UserEntries)
+
+  for _, entry := range entries {
+    p := entry.Parent
+    id := entry.Id
+    name := entry.Name
+    owner := entry.Owner
+    id_entries[id] = entry
+
+    if user_entries[owner] == nil {
+      user_entries[owner] = &UserEntries{
+        make(map[string]*MetaEntry),
+        make(map[string]*MetaEntry),
+        make(map[string][]*MetaEntry),
+      }
+    }
+
+    user := user_entries[owner]
+
+    user.IdEntries[id] = entry
+    user.NameEntries[name] = entry
+    if user.DirEntries[p] == nil {
+      user.DirEntries[p] = make([]*MetaEntry, 0)
+    }
+
+    user.DirEntries[p] = append(user.DirEntries[p], entry)
+  }
+  set.IdEntries = id_entries
+  set.Users = user_entries
+
+  return set
+}
+
+func (this * EntrySet) FromId(user string, id string) * MetaEntry {
+  return this.Users[user].IdEntries[id]
+}
+
+func (this * EntrySet) FromName(user string, name string) * MetaEntry {
+  return this.Users[user].NameEntries[name]
+}
+
 type FileStore struct {
   Path string
   Size int64
   Store * dumbstore.FileSystem
-  Entries []*MetaEntry
-  IdEntries map[string]*MetaEntry
-  Users map[string]*UserEntries
+  Entries *EntrySet
+  Remote map[string]*EntrySet
 }
 
 type MetaEntry struct {
@@ -57,6 +158,8 @@ type MetaEntry struct {
   Chunks []int64 `json:"chunks"`
   Owner string
   Version int64 `json:"version"`
+  Remote bool
+  RemoteHost string
 }
 
 func read_file(file string) []byte {
@@ -88,12 +191,7 @@ func write_file(file string, data []byte) {
   f.Close()
 }
 
-func load_metadata(name string, id_entries map[string]*MetaEntry, user_entries map[string]*UserEntries) []*MetaEntry {
-  buf := read_file("./" + name +  "_meta.json")
-  if buf == nil {
-    buf = []byte("[]")
-  }
-
+func parse_metadata(buf []byte, remote bool) (*EntrySet) {
   var entries []*MetaEntry
   err := json.Unmarshal(buf, &entries)
 
@@ -101,32 +199,28 @@ func load_metadata(name string, id_entries map[string]*MetaEntry, user_entries m
     panic(err)
   }
 
-  for _, entry := range entries {
-    p := entry.Parent
-    id := entry.Id
-    name := entry.Name
-    owner := entry.Owner
-    id_entries[id] = entry
+  return NewEntrySet(entries, remote)
+}
 
-    if user_entries[owner] == nil {
-      user_entries[owner] = &UserEntries{
-        make(map[string]*MetaEntry),
-        make(map[string]*MetaEntry),
-        make(map[string][]*MetaEntry),
-      }
-    }
+func parse_remote_metadata(id string, buf []byte) (*EntrySet) {
+  entries := parse_metadata(buf, true)
+  entries.RemoteId = id
 
-    user := user_entries[owner]
-
-    user.IdEntries[id] = entry
-    user.NameEntries[name] = entry
-    if user.DirEntries[p] == nil {
-      user.DirEntries[p] = make([]*MetaEntry, 0)
-    }
-
-    user.DirEntries[p] = append(user.DirEntries[p], entry)
+  for _, e := range entries.Entries {
+    e.Remote = true
+    e.RemoteHost = id
   }
+
   return entries
+}
+
+func load_metadata(name string) (*EntrySet) {
+  buf := read_file("./" + name +  "_meta.json")
+  if buf == nil {
+    buf = []byte("[]")
+  }
+
+  return parse_metadata(buf, false)
 }
 
 func save_metadata(name string, entries []*MetaEntry) {
@@ -142,21 +236,19 @@ func save_metadata(name string, entries []*MetaEntry) {
 func NewFileStore(name string, size int64) * FileStore {
   store := dumbstore.New(name, size)
 
-  id_entries := make(map[string]*MetaEntry)
-  user_entries := make(map[string]*UserEntries)
+  entries := load_metadata(name)
 
-  entries := load_metadata(name, id_entries, user_entries)
+  remote_entries := make(map[string]*EntrySet)
 
   file_store := &FileStore{
     name,
     size,
     store,
     entries,
-    id_entries,
-    user_entries,
+    remote_entries,
   }
 
-  for name, user := range user_entries {
+  for name, user := range file_store.Entries.Users {
     if user.NameEntries["/"] == nil {
       file_store.CreateFile("/", name, 16822, true)
     }
@@ -180,8 +272,8 @@ func (this * FileStore) Serialize() []byte {
 
 func (this *FileStore) CreateFile(name string, user string, mode uint16, dir bool) string {
 
-  if this.Users[user].NameEntries[name] != nil {
-    return this.Users[user].NameEntries[name].Id
+  if this.Entries.Users[user].NameEntries[name] != nil {
+    return this.Entries.Users[user].NameEntries[name].Id
   }
 
   f_type := "File"
@@ -194,7 +286,7 @@ func (this *FileStore) CreateFile(name string, user string, mode uint16, dir boo
 
   // fmt.Println(this.NameEntries)
 
-  if name == "ROOT" && this.IdEntries["ROOT"] != nil {
+  if name == "ROOT" && this.Entries.IdEntries["ROOT"] != nil {
     return "ROOT"
   }
 
@@ -219,14 +311,14 @@ func (this *FileStore) CreateFile(name string, user string, mode uint16, dir boo
       parent = "/"
     }
 
-    if this.Users[user].NameEntries[parent] == nil && name != "/" {
+    if this.Entries.Users[user].NameEntries[parent] == nil && name != "/" {
       this.CreateFile(parent, user, 16877, true)
     }
 
     if parent == "/" {
       parent = "ROOT"
     } else {
-      parent = this.Users[user].NameEntries[parent].Id
+      parent = this.Entries.Users[user].NameEntries[parent].Id
     }
   } else {
     parent = "ROOT"
@@ -251,12 +343,11 @@ func (this *FileStore) CreateFile(name string, user string, mode uint16, dir boo
     make([]int64, 0),
     user,
     0,
+    false,
+    "",
   }
-  this.Entries = append(this.Entries, entry)
-  this.IdEntries[id] = entry
-  this.Users[user].NameEntries[name] = entry
-  this.Users[user].IdEntries[id] = entry
-  this.Users[user].DirEntries[parent] = append(this.Users[user].DirEntries[parent], entry)
+
+  this.Entries.Add(entry)
   this.Save()
   return id
 }
@@ -295,7 +386,7 @@ func compute_next_read(start int64, end int64) (int64, int64, int64) {
 }
 
 func (this * FileStore) Write(id string, position int64, data []byte) {
-  file := this.IdEntries[id]
+  file := this.Entries.IdEntries[id]
 
   if file == nil {
     return
@@ -359,12 +450,19 @@ func (this * FileStore) Write(id string, position int64, data []byte) {
   if size >= file.Size {
     file.Size = size
   }
+  file.Version = file.Version + 1
   this.Save()
   // fmt.Printf("Wrote %d Bytes\n", written)
 }
 
+func (this * FileStore) ParseRemote(remote_id string, buf []byte) {
+  remote_entries := parse_remote_metadata(remote_id, buf)
+
+  this.Remote[remote_id] = remote_entries
+}
+
 func (this * FileStore) Read(id string, position int64, length int64) []byte {
-  file := this.IdEntries[id]
+  file := this.Entries.IdEntries[id]
 
   if file == nil || position > file.Size {
     return make([]byte, 0)
@@ -413,26 +511,27 @@ func (this * FileStore) Read(id string, position int64, length int64) []byte {
 }
 
 func (this * FileStore) Unlink(id string) {
-  if this.IdEntries[id] == nil {
+  if this.Entries.IdEntries[id] == nil {
     return
   }
 
-  file := this.IdEntries[id]
+  file := this.Entries.IdEntries[id]
 
   for _, chunk := range file.Chunks {
     this.Store.Free(chunk)
   }
 
-  delete(this.IdEntries, id)
+  this.Entries.Remove(id)
+
   this.Save()
 }
 
 func (this * FileStore) Truncate(name string, user string, size int64) {
-  if this.Users[user].NameEntries[name] == nil {
+  if this.Entries.Users[user].NameEntries[name] == nil {
     return
   }
 
-  file := this.Users[user].NameEntries[name]
+  file := this.Entries.Users[user].NameEntries[name]
 
   // Size in bytes of the blocks needed
   block_size := int64(math.Ceil(float64(size) / float64(dumbstore.WRITE_SIZE)) * float64(dumbstore.WRITE_SIZE))
@@ -464,7 +563,7 @@ func (this * FileStore) Truncate(name string, user string, size int64) {
 }
 
 func (this * FileStore) Readdir(name string, user string) (*Error, []string) {
-  file := this.Users[user].NameEntries[name]
+  file := this.Entries.Users[user].NameEntries[name]
 
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
 
@@ -480,7 +579,7 @@ func (this * FileStore) Readdir(name string, user string) (*Error, []string) {
 
   contents := make([]string, 0)
 
-  for _, entry := range this.Entries {
+  for _, entry := range this.Entries.Entries {
     if entry.Parent == pid && entry.Id != "ROOT" {
       contents = append(contents, entry.Name)
     }
@@ -497,12 +596,12 @@ func (this * FileStore) Readdir(name string, user string) (*Error, []string) {
 }
 
 func (this * FileStore) Save() {
-  save_metadata(this.Path, this.Entries)
+  save_metadata(this.Path, this.Entries.Entries)
 }
 
 func (this * FileStore) CreateUser(user string) {
-  if this.Users[user] == nil {
-    this.Users[user] = &UserEntries{
+  if this.Entries.Users[user] == nil {
+    this.Entries.Users[user] = &UserEntries{
       make(map[string]*MetaEntry),
       make(map[string]*MetaEntry),
       make(map[string][]*MetaEntry),
@@ -512,19 +611,79 @@ func (this * FileStore) CreateUser(user string) {
   this.CreateFile("/", user, 16822, true)
 }
 
+func (this * FileStore) LatestId(user, id string) * MetaEntry {
+  local_version := int64(-1)
+  if this.Entries.Users[user].IdEntries[id] != nil {
+    local_version = this.Entries.Users[user].IdEntries[id].Version
+  }
+
+  remote_version := int64(-1)
+  best_remote := ""
+
+  for remote_id, entries := range this.Remote {
+    if entries.Users[user] != nil && entries.Users[user].IdEntries[id] != nil {
+      entry := entries.Users[user].IdEntries[id]
+      if entry.Version > remote_version {
+        remote_version = entries.Users[user].IdEntries[id].Version
+        best_remote = remote_id
+      }
+    }
+  }
+
+  if local_version == - 1 && remote_version == -1 {
+    return nil
+  }
+
+  if remote_version > local_version {
+    return this.Remote[best_remote].IdEntries[id]
+  } else {
+    return this.Entries.IdEntries[id]
+  }
+}
+
+func (this * FileStore) LatestName(user, name string) * MetaEntry {
+  local_version := int64(-1)
+  if this.Entries.Users[user].NameEntries[name] != nil {
+    local_version = this.Entries.Users[user].NameEntries[name].Version
+  }
+
+  remote_version := int64(-1)
+  best_remote := ""
+
+  for remote_id, entries := range this.Remote {
+    if entries.Users[user] != nil && entries.Users[user].NameEntries[name] != nil {
+      entry := entries.Users[user].NameEntries[name]
+      if entry.Version > remote_version {
+        remote_version = entries.Users[user].NameEntries[name].Version
+        best_remote = remote_id
+      }
+    }
+  }
+
+  if local_version == - 1 && remote_version == -1 {
+    return nil
+  }
+
+  if remote_version > local_version {
+    return this.Remote[best_remote].Users[user].NameEntries[name]
+  } else {
+    return this.Entries.Users[user].NameEntries[name]
+  }
+}
+
 func main() {
   // fmt.Println("Starting File Store")
   file_store := NewFileStore("data", SIZE)
 
   var id string
 
-  if file_store.Users["*"].NameEntries["Dummy"] != nil {
-    id = file_store.Users["*"].NameEntries["Dummy"].Id
+  if file_store.Entries.Users["*"].NameEntries["Dummy"] != nil {
+    id = file_store.Entries.Users["*"].NameEntries["Dummy"].Id
   } else {
       id = file_store.CreateFile("Dummy", "*", 33206, true)
   }
 
-  file := file_store.IdEntries[id]
+  file := file_store.Entries.IdEntries[id]
 
   for i := 0; i < 1000; i++ {
     file_store.Write(id, file.Size, []byte("Hello World\nTesting\n"))
