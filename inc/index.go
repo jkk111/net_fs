@@ -406,5 +406,8 @@ func (this * INCRouter) Emit(message * INCMessage) {
 
 func (this * INCRouter) Send(node string, message * INCMessage) {
   message.Id = this.Id
+
+  fmt.Println(this.nodes, node)
+
   this.nodes[node].Send(message)
 }
