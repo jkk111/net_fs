@@ -362,6 +362,11 @@ func (this * INCRouter) connect(url string) {
 
   id := shello.Id
 
+  if string(id) == string(this.Id) {
+    conn.Close()
+    return
+  }
+
   fmt.Println("Successful Handshake", id)
 
   conn.SetReadDeadline(time.Time{})
