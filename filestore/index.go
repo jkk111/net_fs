@@ -262,7 +262,7 @@ func (this * FileStore) Close() {
 }
 
 func (this * FileStore) Serialize() []byte {
-  buf, err := json.Marshal(this.Entries)
+  buf, err := json.Marshal(this.Entries.Entries)
   if err != nil {
     panic(err)
   }
