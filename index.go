@@ -518,7 +518,7 @@ func node_connected (node * inc.INCNode) {
 }
 
 func ws_connect_list(m * inc.INCMessage) {
-  fmt.Println("Received Message", m)
+  fmt.Println("Received Message", m.Id)
 
   store.ParseRemote(string(m.Id), m.Message)
 }
