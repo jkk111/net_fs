@@ -139,46 +139,12 @@ func Serialize(iface interface{}) []byte {
   return buf
 }
 
-// func read(request ReadRequest) []byte {
-//   name := request.Name
-//   offset := request.Offset
-//   length := request.Length
-//   version := request.Version
-//   user := request.User
-
-//   store.CreateUser(user)
-
-//   if store.Users[user].NameEntries[name] == nil {
-//     return ENOENT
-//   }
-
-//   file := store.Users[user].NameEntries[name]
-
-//   if file.Invalidated || file.Version < version {
-//     // Reach Out To Network For Valid Version
-//   }
-
-//   store.Read(file.Id, offset, length)
-//   return nil // TODO
-// }
-
-func Read(w http.ResponseWriter, req * http.Request) {
-  var request ReadRequest
-  MessageFromStream(req.Body, &request)
-
-  name := request.Name
-  offset := request.Offset
-  length := request.Length
-  user := request.User
-  file := store.LatestName(user, name)
+func read(id string, offset, length int64) []byte {
+  file := store.Entries.IdEntries[id]
 
   if file == nil {
-    w.WriteHeader(http.StatusNotFound)
-    w.Write(ENOENT)
-    return
+    return ENOENT
   }
-
-  id := file.Id
 
   read := store.Read(id, offset, length)
 
@@ -201,9 +167,48 @@ func Read(w http.ResponseWriter, req * http.Request) {
     read = read[:file.Size - offset]
   }
 
-  fmt.Printf("Read Length: %s Position: %d, Have: %d, Buf: %d, Want: %d\n", name, offset, file.Size, len(read), length)
+  return read
+}
 
-  w.Write(read)
+func read_remote(remote string, read_request ReadRequest) []byte {
+  request := Serialize(read_request)
+  message := inc.NewINCMessage("READ", false, request)
+
+  resp_ch := make(chan * inc.INCMessage)
+  router.Await(string(message.Mid), resp_ch)
+
+  resp := <- resp_ch
+
+  return resp.Message
+}
+
+func Read(w http.ResponseWriter, req * http.Request) {
+  var request ReadRequest
+  MessageFromStream(req.Body, &request)
+
+  name := request.Name
+  user := request.User
+  file := store.LatestName(user, name)
+  store.CreateUser(user)
+
+  if file == nil {
+    w.WriteHeader(http.StatusNotFound)
+    w.Write(ENOENT)
+    return
+  }
+
+  offset := request.Offset
+  length := request.Length
+  var data []byte
+
+  if file.Remote {
+    data = read_remote(file.Id, request)
+  } else {
+    data = read(file.Id, offset, length)
+  }
+
+  fmt.Printf("Read Length: %s Position: %d, Have: %d, Buf: %d, Want: %d\n", name, offset, file.Size, len(data), length)
+  w.Write(data)
 }
 
 func Write(w http.ResponseWriter, req * http.Request) {

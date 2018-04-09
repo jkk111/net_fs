@@ -76,6 +76,10 @@ type INCRouter struct {
   mchan chan * INCMessage
 }
 
+func (this * INCRouter) Await(mid string, ch chan * INCMessage) {
+  this.awaiting[mid] = ch
+}
+
 func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
   _ = websocket.DefaultDialer
   mid := random_id()
@@ -246,8 +250,10 @@ func (this * INCRouter) handleMessages() {
     rid := string(msg.Rid)
 
     if this.awaiting[rid] != nil {
-      this.awaiting[rid] <- msg
+      ln := this.awaiting[rid]
       delete(this.awaiting, rid)
+      ln <- msg
+      continue
     }
 
     m_type := msg.Type
