@@ -31,7 +31,7 @@ type INCMessage struct {
   Type string `json:"type"` // (Optional): Defines a destination node
   Echo bool `json:"echo"` // Should message be echoed
   Message []byte `json:"message"` // Message to proxy
-  sender * INCMessage
+  sender * INCNode
 }
 
 type INCHello struct {
@@ -222,6 +222,10 @@ func (this * INCNode) handleMessages() {
     }
 
     msg := ParseMessage(m)
+    msg.sender = this
+
+    fmt.Println("Parsed Incoming Message", msg.Type)
+
     this.mchan <- msg
   }
 }
@@ -229,8 +233,9 @@ func (this * INCNode) handleMessages() {
 func (this * INCRouter) handleMessages() {
   for {
     time.Sleep(time.Second)
+    fmt.Println("awaiting!")
     msg := this.Receive()
-
+    fmt.Println("Here", msg)
     _ = msg.sender.Id
 
     mid := string(msg.Mid)
@@ -248,7 +253,10 @@ func (this * INCRouter) handleMessages() {
     m_type := msg.Type
 
     if this.handlers[m_type] != nil {
+      fmt.Println("Handler for type", m_type)
       this.handlers[m_type] <- msg
+    } else {
+      fmt.Println("No Handler For Type", m_type)
     }
 
     dest := string(msg.Dest)

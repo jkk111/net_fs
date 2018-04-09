@@ -489,7 +489,8 @@ func node_connected (node * inc.INCNode) {
 }
 
 func ws_connect_list(m * inc.INCMessage) {
-  fmt.Println("Received Message")
+  remote := string(m.Message)
+  fmt.Println("Received Message", remote)
 }
 
 func create_server() {
@@ -524,6 +525,8 @@ func create_server() {
   router.OnConnect(node_connected)
 
   router.BootstrapNodes(bootstrap)
+
+  go router.HandleMessages()
 
   for {
     select {
