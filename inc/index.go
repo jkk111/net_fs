@@ -50,6 +50,7 @@ func (this * INCMessage) Serialize() []byte {
 
 type INCNode struct {
   Id []byte
+  router * INCRouter
   conn * websocket.Conn
   mchan chan * INCMessage
 }
@@ -63,12 +64,14 @@ type INCConfig struct {
   Bootstrap []string `json:"bootstrap"`
 }
 
+// Type Signatures are hard :(
 type INCRouter struct {
   Id []byte
   nodes map[string]*INCNode
   records map[string]*MessageRecord
   awaiting map[string]chan * INCMessage
   handlers map[string]chan * INCMessage
+  connection_listeners []func(*INCNode)
   Bootstrap []string
   mchan chan * INCMessage
 }
@@ -129,6 +132,9 @@ func create_router(config * INCConfig) * INCRouter {
   records := make(map[string] * MessageRecord)
   awaiting := make(map[string]chan * INCMessage)
   handlers := make(map[string]chan * INCMessage)
+
+  connection_listeners := make([]func(*INCNode), 0)
+
   router := &INCRouter{
     Id: config.Id,
     Bootstrap: config.Bootstrap,
@@ -137,6 +143,7 @@ func create_router(config * INCConfig) * INCRouter {
     records: records,
     awaiting: awaiting,
     handlers: handlers,
+    connection_listeners: connection_listeners,
   }
 
   return router
@@ -179,6 +186,10 @@ func (this * INCRouter) On(evt string, ch chan * INCMessage) {
   this.handlers[evt] = ch
 }
 
+func (this * INCRouter) OnConnect(f func(*INCNode)) {
+  this.connection_listeners = append(this.connection_listeners, f)
+}
+
 func (this * INCRouter) Receive() (*INCMessage) {
   return <- this.mchan
 }
@@ -187,12 +198,17 @@ func (this * INCNode) Close() {
 
 }
 
-
 func (this * INCNode) Send(message * INCMessage) {
   this.conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
 }
 
 func (this * INCNode) handleMessages() {
+  // TODO()
+
+  for _, ln := range this.router.connection_listeners {
+    ln(this)
+  }
+
   for {
     t, m, err := this.conn.ReadMessage()
 
@@ -282,7 +298,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   conn.SetReadDeadline(time.Time{})
 
-  node := &INCNode{ id, conn, this.mchan }
+  node := &INCNode{ id, this, conn, this.mchan }
   this.nodes[string(id)] = node
   go node.handleMessages()
 }
@@ -333,7 +349,7 @@ func (this * INCRouter) connect(url string) {
   fmt.Println("Successful Handshake", id)
 
   conn.SetReadDeadline(time.Time{})
-  node := &INCNode{ id, conn, this.mchan }
+  node := &INCNode{ id, this, conn, this.mchan }
   this.nodes[string(id)] = node
 
   go node.handleMessages()

@@ -27,14 +27,19 @@ var (
   ENOTDIR * Error = NewError("ENOTDIR")
 )
 
+type UserEntries struct {
+  IdEntries map[string]*MetaEntry
+  NameEntries map[string]*MetaEntry
+  DirEntries map[string][]*MetaEntry
+}
+
 type FileStore struct {
   Path string
   Size int64
   Store * dumbstore.FileSystem
   Entries []*MetaEntry
   IdEntries map[string]*MetaEntry
-  NameEntries map[string]*MetaEntry
-  DirEntries map[string][]*MetaEntry
+  Users map[string]*UserEntries
 }
 
 type MetaEntry struct {
@@ -44,12 +49,14 @@ type MetaEntry struct {
   Mode uint16 `json:"mode"`
   Dir bool `json:"dir"`
   Invalidated bool `json:"invalidated"`
+  Wanted bool `json:"wanted"`
   Parent string `json:"parent"`
   Accessed int64 `json:"accessed"`
   Created int64 `json:"created"`
   Modified int64 `json:"modified"`
   Chunks []int64 `json:"chunks"`
   Owner string
+  Version int64 `json:"version"`
 }
 
 func read_file(file string) []byte {
@@ -81,7 +88,7 @@ func write_file(file string, data []byte) {
   f.Close()
 }
 
-func load_metadata(name string, id_entries, name_entries map[string]*MetaEntry) []*MetaEntry {
+func load_metadata(name string, id_entries map[string]*MetaEntry, user_entries map[string]*UserEntries) []*MetaEntry {
   buf := read_file("./" + name +  "_meta.json")
   if buf == nil {
     buf = []byte("[]")
@@ -95,8 +102,29 @@ func load_metadata(name string, id_entries, name_entries map[string]*MetaEntry) 
   }
 
   for _, entry := range entries {
-    id_entries[entry.Id] = entry
-    name_entries[entry.Name] = entry
+    p := entry.Parent
+    id := entry.Id
+    name := entry.Name
+    owner := entry.Owner
+    id_entries[id] = entry
+
+    if user_entries[owner] == nil {
+      user_entries[owner] = &UserEntries{
+        make(map[string]*MetaEntry),
+        make(map[string]*MetaEntry),
+        make(map[string][]*MetaEntry),
+      }
+    }
+
+    user := user_entries[owner]
+
+    user.IdEntries[id] = entry
+    user.NameEntries[name] = entry
+    if user.DirEntries[p] == nil {
+      user.DirEntries[p] = make([]*MetaEntry, 0)
+    }
+
+    user.DirEntries[p] = append(user.DirEntries[p], entry)
   }
   return entries
 }
@@ -115,9 +143,9 @@ func NewFileStore(name string, size int64) * FileStore {
   store := dumbstore.New(name, size)
 
   id_entries := make(map[string]*MetaEntry)
-  name_entries := make(map[string]*MetaEntry)
-  dir_entries := make(map[string][]*MetaEntry)
-  entries := load_metadata(name, id_entries, name_entries)
+  user_entries := make(map[string]*UserEntries)
+
+  entries := load_metadata(name, id_entries, user_entries)
 
   file_store := &FileStore{
     name,
@@ -125,12 +153,13 @@ func NewFileStore(name string, size int64) * FileStore {
     store,
     entries,
     id_entries,
-    name_entries,
-    dir_entries,
+    user_entries,
   }
 
-  if name_entries["/"] == nil {
-    file_store.CreateFile("/", "*", 16877, true)
+  for name, user := range user_entries {
+    if user.NameEntries["/"] == nil {
+      file_store.CreateFile("/", name, 16822, true)
+    }
   }
 
   return file_store
@@ -140,12 +169,28 @@ func (this * FileStore) Close() {
   this.Save()
 }
 
-func (this *FileStore) CreateFile(name string, user string, mode uint16, dir bool) string {
-  if this.NameEntries[name] != nil {
-    return this.NameEntries[name].Id
+func (this * FileStore) Serialize() []byte {
+  buf, err := json.Marshal(this.Entries)
+  if err != nil {
+    panic(err)
   }
 
-  fmt.Printf("Creating (%s)\n", name)
+  return buf
+}
+
+func (this *FileStore) CreateFile(name string, user string, mode uint16, dir bool) string {
+
+  if this.Users[user].NameEntries[name] != nil {
+    return this.Users[user].NameEntries[name].Id
+  }
+
+  f_type := "File"
+
+  if dir {
+    f_type = "Dir"
+  }
+
+  fmt.Printf("Creating %s (%s)\n", f_type, name)
 
   // fmt.Println(this.NameEntries)
 
@@ -174,14 +219,14 @@ func (this *FileStore) CreateFile(name string, user string, mode uint16, dir boo
       parent = "/"
     }
 
-    if this.NameEntries[parent] == nil && name != "/" {
+    if this.Users[user].NameEntries[parent] == nil && name != "/" {
       this.CreateFile(parent, user, 16877, true)
     }
 
     if parent == "/" {
       parent = "ROOT"
     } else {
-      parent = this.NameEntries[parent].Id
+      parent = this.Users[user].NameEntries[parent].Id
     }
   } else {
     parent = "ROOT"
@@ -198,16 +243,20 @@ func (this *FileStore) CreateFile(name string, user string, mode uint16, dir boo
     mode,
     dir,
     false,
+    true,
     parent,
     t,
     t,
     t,
     make([]int64, 0),
     user,
+    0,
   }
   this.Entries = append(this.Entries, entry)
   this.IdEntries[id] = entry
-  this.NameEntries[name] = entry
+  this.Users[user].NameEntries[name] = entry
+  this.Users[user].IdEntries[id] = entry
+  this.Users[user].DirEntries[parent] = append(this.Users[user].DirEntries[parent], entry)
   this.Save()
   return id
 }
@@ -317,7 +366,7 @@ func (this * FileStore) Write(id string, position int64, data []byte) {
 func (this * FileStore) Read(id string, position int64, length int64) []byte {
   file := this.IdEntries[id]
 
-  if file == nil {
+  if file == nil || position > file.Size {
     return make([]byte, 0)
   }
 
@@ -337,7 +386,7 @@ func (this * FileStore) Read(id string, position int64, length int64) []byte {
     chunk, start, end := compute_next_read(file_start + read, file_end)
     var chunk_data []byte
 
-    if chunk > int64(len(file.Chunks)) {
+    if chunk >= int64(len(file.Chunks)) {
       return buf[:read]
     } else {
       mapped_chunk := file.Chunks[chunk]
@@ -363,36 +412,27 @@ func (this * FileStore) Read(id string, position int64, length int64) []byte {
   return buf[:slice_size]
 }
 
-func (this * FileStore) Unlink(name string) {
-  if this.NameEntries[name] == nil {
+func (this * FileStore) Unlink(id string) {
+  if this.IdEntries[id] == nil {
     return
   }
 
-  file := this.NameEntries[name]
-  id := file.Id
+  file := this.IdEntries[id]
 
   for _, chunk := range file.Chunks {
     this.Store.Free(chunk)
   }
 
-  for i, file := range this.Entries {
-    if file.Name == name {
-      this.Entries = append(this.Entries[:i], this.Entries[i+1:]...)
-      break
-    }
-  }
-
-  delete(this.NameEntries, name)
   delete(this.IdEntries, id)
   this.Save()
 }
 
-func (this * FileStore) Truncate(name string, size int64) {
-  if this.NameEntries[name] == nil {
+func (this * FileStore) Truncate(name string, user string, size int64) {
+  if this.Users[user].NameEntries[name] == nil {
     return
   }
 
-  file := this.NameEntries[name]
+  file := this.Users[user].NameEntries[name]
 
   // Size in bytes of the blocks needed
   block_size := int64(math.Ceil(float64(size) / float64(dumbstore.WRITE_SIZE)) * float64(dumbstore.WRITE_SIZE))
@@ -423,14 +463,16 @@ func (this * FileStore) Truncate(name string, size int64) {
   this.Save()
 }
 
-func (this * FileStore) Readdir(name string) (*Error, []string) {
-  file := this.NameEntries[name]
+func (this * FileStore) Readdir(name string, user string) (*Error, []string) {
+  file := this.Users[user].NameEntries[name]
 
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
 
   if file == nil {
+    fmt.Println(file)
     return ENOENT, nil
   } else if !file.Dir {
+    fmt.Printf("%s, %s, %+v\n", name, user, file)
     return ENOTDIR, nil
   }
 
@@ -458,14 +500,26 @@ func (this * FileStore) Save() {
   save_metadata(this.Path, this.Entries)
 }
 
+func (this * FileStore) CreateUser(user string) {
+  if this.Users[user] == nil {
+    this.Users[user] = &UserEntries{
+      make(map[string]*MetaEntry),
+      make(map[string]*MetaEntry),
+      make(map[string][]*MetaEntry),
+    }
+  }
+
+  this.CreateFile("/", user, 16822, true)
+}
+
 func main() {
   // fmt.Println("Starting File Store")
   file_store := NewFileStore("data", SIZE)
 
   var id string
 
-  if file_store.NameEntries["Dummy"] != nil {
-    id = file_store.NameEntries["Dummy"].Id
+  if file_store.Users["*"].NameEntries["Dummy"] != nil {
+    id = file_store.Users["*"].NameEntries["Dummy"].Id
   } else {
       id = file_store.CreateFile("Dummy", "*", 33206, true)
   }

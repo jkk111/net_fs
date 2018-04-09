@@ -272,6 +272,7 @@ func (this * FileSystem) Seek(offset int64) {
 
 
 func (this * FileSystem) Reserve(chunk int64) {
+  this.Lock()
   // fmt.Println("Reserving Chunk", chunk)
   c_byte := chunk / 8
   c_offset := byte(chunk % 8)
@@ -294,9 +295,11 @@ func (this * FileSystem) Reserve(chunk int64) {
   this.handle.Seek(-1, 1) // We seek backwards here rather than going from the start of the file again!
   this.handle.Write(buf)
   this.availability[chunk] = false
+  this.Unlock()
 }
 
 func (this * FileSystem) Free(chunk int64) {
+  this.Lock()
   c_byte := chunk / 8
   c_offset := byte(chunk % 8)
   mask := byte(0x80 >> c_offset)
@@ -315,6 +318,7 @@ func (this * FileSystem) Free(chunk int64) {
   tmp := make([]byte, WRITE_SIZE)
   this.Overwrite(offset, tmp)
   this.availability[chunk] = true
+  this.Unlock()
 }
 
 func (this * FileSystem) Write(data []byte) []int64 {
@@ -363,11 +367,13 @@ func (this * FileSystem) Overwrite(chunk int64, data []byte) {
 }
 
 func (this * FileSystem) OverwriteOffset(chunk, offset int64, data []byte) {
+  this.Lock()
   if offset == 0 {
     this.Overwrite(chunk, data)
   }
   this.Seek((chunk * WRITE_SIZE) + this.offset + offset)
   this.handle.Write(data)
+  this.Unlock()
 }
 
 func (this * FileSystem) Read(offset, length int64) []byte {
