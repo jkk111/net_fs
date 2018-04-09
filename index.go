@@ -176,6 +176,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
 
   resp_ch := make(chan * inc.INCMessage)
   router.Await(string(message.Mid), resp_ch)
+  router.Send(remote, message)
 
   resp := <- resp_ch
 
@@ -522,6 +523,33 @@ func ws_connect_list(m * inc.INCMessage) {
   store.ParseRemote(string(m.Id), m.Message)
 }
 
+func ws_read(m * inc.INCMessage) {
+  var request ReadRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file == nil {
+    panic("This Shouldn't Happen")
+  }
+
+  offset := request.Offset
+  length := request.Length
+
+  var data []byte
+
+  if file.Remote {
+    data = read_remote(file.RemoteHost, request)
+  } else {
+    data = read(file.Id, offset, length)
+  }
+
+  fmt.Println("TODO: Missing Response", data)
+}
+
 func create_server() {
   mux := http.NewServeMux()
   mux.HandleFunc("/api/read", Read)
@@ -541,12 +569,13 @@ func create_server() {
 
   go listen(mux)
 
+  read_chan := make(chan * inc.INCMessage)
   readdir_chan := make(chan * inc.INCMessage)
   invalidation_chan := make(chan * inc.INCMessage)
   unlink_chan := make(chan * inc.INCMessage)
   connectlist_chan := make(chan * inc.INCMessage)
 
-
+  router.On("READ", read_chan)
   router.On("READDIR", readdir_chan)
   router.On("INVALIDATE", invalidation_chan)
   router.On("UNLINK", unlink_chan)
@@ -567,6 +596,8 @@ func create_server() {
         go ws_unlink(msg)
       case msg := <- connectlist_chan:
         go ws_connect_list(msg)
+      case msg := <- read_chan:
+        go ws_read(msg)
     }
   }
 }
