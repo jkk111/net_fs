@@ -333,6 +333,9 @@ func Stat(w http.ResponseWriter, req * http.Request) {
     w.Write(ENOENT)
   } else {
     buf, _ := json.Marshal(&file)
+
+    fmt.Println("Stated", buf)
+
     w.Write(buf)
   }
 }
