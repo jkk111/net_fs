@@ -193,6 +193,25 @@ func read_remote(remote string, read_request ReadRequest) []byte {
   return resp.Message
 }
 
+func remote_peak(remote string, peak_request PeakRequest) []byte {
+  request := Serialize(peak_request)
+  message := inc.NewINCMessage("PEAK", false, request)
+
+  resp_ch := make(chan * inc.INCMessage)
+  router.Await(string(message.Mid), resp_ch)
+  router.Send(remote, message)
+
+  resp := <- resp_ch
+
+  return resp.Message
+}
+
+func remote_append(remote string, append_request AppendRequest) {
+  request := Serialize(append_request)
+  message := inc.NewINCMessage("APPEND", false, request)
+  router.Send(remote, message)
+}
+
 func Read(w http.ResponseWriter, req * http.Request) {
   var request ReadRequest
   MessageFromStream(req.Body, &request)
@@ -250,6 +269,18 @@ func Write(w http.ResponseWriter, req * http.Request) {
   w.Write([]byte("OK"))
 }
 
+func unlink(user, name string) {
+  file := store.LatestName(user, name)
+  store.Unlink(file.Id)
+}
+
+func remote_unlink(remote string, unlink_request UnlinkRequest) {
+  request := Serialize(unlink_request)
+  message := inc.NewINCMessage("UNLINK", true, request)
+
+  router.Send(remote, message)
+}
+
 func Create(w http.ResponseWriter, req * http.Request) {
   var request CreateRequest
   MessageFromStream(req.Body, &request)
@@ -260,14 +291,35 @@ func Create(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(user)
 
-  id := store.CreateFile(name, user, mode, false)
+  id := store.CreateFile(user, name, mode, false)
 
   w.Write([]byte(id))
+}
+
+func ws_create(m * inc.INCMessage) {
+  // var request
+}
+
+func ws_mkdir(m * inc.INCMessage) {
+
+}
+
+func ws_rmdir(m * inc.INCMessage) {
+  var request RmdirRequest
+  MessageFromBuf(m.Message, &request)
+  fmt.Printf("TODO WS_rmdir%+v\n", request)
+}
+
+func ws_truncate(m * inc.INCMessage) {
+  var request TruncateRequest
+  MessageFromBuf(m.Message, &request)
 }
 
 func Stat(w http.ResponseWriter, req * http.Request) {
   var request StatRequest
   MessageFromStream(req.Body, &request)
+
+  fmt.Printf("%+v\n", request)
 
   store.CreateUser(request.User)
 
@@ -277,11 +329,30 @@ func Stat(w http.ResponseWriter, req * http.Request) {
   file := store.LatestName(user, name)
 
   if file == nil {
+    fmt.Printf("File Is Nil %s\n", name)
     w.Write(ENOENT)
   } else {
     buf, _ := json.Marshal(&file)
     w.Write(buf)
   }
+}
+
+func remote_rename(remote string, rename_request RenameRequest) {
+  request := Serialize(rename_request)
+  message := inc.NewINCMessage("RENAME", false, request)
+  router.Send(remote, message)
+}
+
+func rename(user string, name string, updated string) {
+  file := store.LatestName(user, name)
+  existing := store.LatestName(user, updated)
+  if existing != nil {
+    store.Unlink(existing.Id)
+  }
+
+  store.Entries.Remove(file.Id)
+  file.Name = updated
+  store.Entries.Add(file)
 }
 
 func Rename(w http.ResponseWriter, req * http.Request) {
@@ -297,17 +368,12 @@ func Rename(w http.ResponseWriter, req * http.Request) {
 
   if file == nil {
     w.Write(ENOENT)
+  }
+
+  if file.Remote {
+    remote_rename(file.RemoteHost, request)
   } else {
-    if store.LatestName(user, name) != nil {
-      store.Unlink(request.Updated)
-    }
-
-    // store.Users[request.User].NameEntries[request.Updated] = file
-
-    file.Name = request.Updated
-    store.Entries.Remove(file.Id)
-    store.Entries.Add(file)
-
+    rename(user, name, request.Updated)
     w.Write([]byte("OK"))
     store.Save()
   }
@@ -320,7 +386,7 @@ func Readdir(w http.ResponseWriter, req * http.Request) {
   store.CreateUser(request.User)
 
   name := request.Name
-  e, contents := store.Readdir(name, request.User)
+  e, contents := store.Readdir(request.User, name)
 
   if e != nil {
     switch e.Code {
@@ -331,6 +397,8 @@ func Readdir(w http.ResponseWriter, req * http.Request) {
     }
     return
   }
+
+  fmt.Println("Readdir", request.Name, contents)
 
   buf, err := json.Marshal(&contents)
 
@@ -352,8 +420,10 @@ func Unlink(w http.ResponseWriter, req * http.Request) {
 
   file := store.LatestName(user, name)
 
-  if file != nil {
-    store.Unlink(file.Id)
+  if file.Remote {
+    remote_unlink(file.RemoteHost, request)
+  } else {
+    unlink(user, name)
   }
 
   w.Write([]byte("OK"))
@@ -366,7 +436,7 @@ func Mkdir(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(user)
 
-  store.CreateFile(request.Name, user, request.Mode, true)
+  store.CreateFile(user, request.Name, request.Mode, true)
 
   w.Write([]byte("OK"))
 }
@@ -383,22 +453,57 @@ func Rmdir(w http.ResponseWriter, req * http.Request) {
   file := store.LatestName(user, name)
 
   if file != nil && file.Dir {
-    store.Unlink(request.Name)
+    if file.Remote {
+      remote_unlink(file.RemoteHost, UnlinkRequest(request))
+    } else {
+      store.Unlink(request.Name)
+    }
   }
 
   w.Write([]byte("OK"))
 }
 
+func remote_truncate(remote string, truncate_request TruncateRequest) {
+  request := Serialize(truncate_request)
+  message := inc.NewINCMessage("TRUNCATE", false, request)
+  router.Send(remote, message)
+}
+
+func truncate(user, name string, size int64) {
+  store.CreateUser(user)
+  store.Truncate(user, name, size)
+}
+
 func Truncate( w http.ResponseWriter, req * http.Request) {
   var request TruncateRequest
   MessageFromStream(req.Body, &request)
-
   fmt.Printf("Truncate Request %+v\n", request)
-
   store.CreateUser(request.User)
 
-  store.Truncate(request.Name, request.User, request.Size)
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file.Remote {
+    remote_truncate(file.RemoteHost, request)
+  } else {
+    truncate(user, name, request.Size)
+  }
+
   w.Write([]byte("OK"))
+}
+
+func remote_utimens(remote string, utimens_request UTimeNSRequest) {
+  request := Serialize(utimens_request)
+  message := inc.NewINCMessage("UTIMENS", false, request)
+  router.Send(remote, message)
+}
+
+func utimens(id string, accessed, modified int64) {
+  file := store.Entries.IdEntries[id]
+  file.Accessed = accessed
+  file.Modified = modified
 }
 
 func UTimeNS(w http.ResponseWriter, req * http.Request) {
@@ -414,10 +519,29 @@ func UTimeNS(w http.ResponseWriter, req * http.Request) {
 
   if file == nil {
     w.Write(ENOENT)
+  }
+
+  if file.Remote {
+    remote_utimens(file.RemoteHost, request)
   } else {
-    file.Accessed = request.Atime
-    file.Modified = request.Mtime
+    utimens(file.Id, request.Atime, request.Mtime)
     w.Write([]byte("OK"))
+  }
+}
+
+func ws_utimens(m * inc.INCMessage) {
+  var request UTimeNSRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file.Remote {
+    remote_utimens(file.RemoteHost, request)
+  } else {
+    utimens(file.Id, request.Atime, request.Mtime)
   }
 }
 
@@ -435,10 +559,27 @@ func Append(w http.ResponseWriter, req * http.Request) {
 
   if file == nil {
     w.Write(ENOENT)
+  }
+
+
+  if file.Remote {
+    remote_append(file.RemoteHost, request)
   } else {
     store.Write(file.Id, file.Size, request.Buffer)
     w.Write([]byte("OK"))
   }
+}
+
+func peak(id string, length int64) []byte {
+  file := store.Entries.IdEntries[id]
+
+  start := file.Size - length
+  if start < 0 {
+    start = 0
+    length = file.Size
+  }
+
+  return store.Read(file.Id, start, length)
 }
 
 func Peak(w http.ResponseWriter, req * http.Request) {
@@ -454,17 +595,16 @@ func Peak(w http.ResponseWriter, req * http.Request) {
   if file == nil {
     w.Write(ENOENT)
     return
-  } else {
-    length := request.Length
-    start := file.Size - length
-    if start < 0 {
-      start = 0
-      length = file.Size
-    }
-
-    buf := store.Read(file.Id, start, length)
-    w.Write(buf)
   }
+
+  var data []byte
+
+  if file.Remote {
+    data = remote_peak(file.RemoteHost, request)
+  } else {
+    data = peak(file.Id, request.Length)
+  }
+  w.Write(data)
 }
 
 func MessageFromStream(reader io.ReadCloser, iface interface{}) {
@@ -486,25 +626,9 @@ func MessageFromBuf(buf []byte, iface interface{}) {
   }
 }
 
-func ws_invalidate(msg * inc.INCMessage) {
-  var request InvalidationRequest
-  MessageFromBuf(msg.Message, &request)
-
-  fmt.Printf("%+v\n", request)
-}
-
-
-func ws_unlink(msg * inc.INCMessage) {
-  var request UnlinkRequest
-  MessageFromBuf(msg.Message, &request)
-  fmt.Printf("%+v\n", request)
-}
-
 func listen(mux * http.ServeMux) {
   fmt.Println(http.ListenAndServe(":8090", mux))
 }
-
-// func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
 
 func node_connected (node * inc.INCNode) {
   fmt.Println("Node Connected, Sending File List")
@@ -513,9 +637,20 @@ func node_connected (node * inc.INCNode) {
   router.Send(string(node.Id), message)
 }
 
-func ws_connect_list(m * inc.INCMessage) {
-  fmt.Println("Received Message", m.Id)
+func ws_invalidate(msg * inc.INCMessage) {
+  var request InvalidationRequest
+  MessageFromBuf(msg.Message, &request)
+  fmt.Printf("TODO WS_INVALIDATE%+v\n", request)
+}
 
+
+func ws_unlink(msg * inc.INCMessage) {
+  var request UnlinkRequest
+  MessageFromBuf(msg.Message, &request)
+  fmt.Printf("TODO WS_UNLINK%+v\n", request)
+}
+
+func ws_connect_list(m * inc.INCMessage) {
   store.ParseRemote(string(m.Id), m.Message)
 }
 
@@ -572,21 +707,78 @@ func ws_write(m * inc.INCMessage) {
   }
 }
 
+func ws_append(m * inc.INCMessage) {
+  var request AppendRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file.Remote {
+    remote_append(file.RemoteHost, request)
+  } else {
+    buffer := request.Buffer
+    store.Write(file.Id, file.Size, buffer)
+  }
+}
+
+func ws_peak(m * inc.INCMessage) {
+  var request PeakRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+  length := request.Length
+
+  file := store.LatestName(user, name)
+
+  var data []byte
+
+  if file.Remote {
+    data = remote_peak(file.RemoteHost, request)
+  } else {
+    data = peak(file.Id, length)
+  }
+
+  msg := inc.NewINCMessage("READ_RESPONSE", false, data)
+  msg.Rid = m.Mid
+
+  router.Send(string(m.Id), msg)
+}
+
+func ws_rename(m * inc.INCMessage) {
+  var request RenameRequest
+  MessageFromBuf(m.Message, &request)
+
+  user := request.User
+  name := request.Name
+
+  file := store.LatestName(user, name)
+
+  if file.Remote {
+    remote_rename(file.RemoteHost, request)
+  } else {
+    rename(user, name, request.Updated)
+  }
+}
+
 func create_server() {
   mux := http.NewServeMux()
-  mux.HandleFunc("/api/read", Read)
-  mux.HandleFunc("/api/write", Write)
-  mux.HandleFunc("/api/append", Append)
-  mux.HandleFunc("/api/peak", Peak)
-  mux.HandleFunc("/api/create", Create)
-  mux.HandleFunc("/api/stat", Stat)
-  mux.HandleFunc("/api/rename", Rename)
+  mux.HandleFunc("/api/read", Read) // Exposed On Socket
+  mux.HandleFunc("/api/write", Write) // Exposed On Socket
+  mux.HandleFunc("/api/append", Append) // Exposed On Socket
+  mux.HandleFunc("/api/peak", Peak) // Exposed On Socket
+  mux.HandleFunc("/api/create", Create) // Exposed On Socket
+  mux.HandleFunc("/api/stat", Stat) // Exposed On Socket
+  mux.HandleFunc("/api/rename", Rename) // Exposed On Socket
   mux.HandleFunc("/api/readdir", Readdir)
-  mux.HandleFunc("/api/unlink", Unlink)
-  mux.HandleFunc("/api/mkdir", Mkdir)
-  mux.HandleFunc("/api/rmdir", Rmdir)
-  mux.HandleFunc("/api/truncate", Truncate)
-  mux.HandleFunc("/api/utimens", UTimeNS)
+  mux.HandleFunc("/api/unlink", Unlink) // Exposed On Socket
+  mux.HandleFunc("/api/mkdir", Mkdir) // Exposed On Socket
+  mux.HandleFunc("/api/rmdir", Rmdir) // Exposed On Socket
+  mux.HandleFunc("/api/truncate", Truncate) // Exposed On Socket
+  mux.HandleFunc("/api/utimens", UTimeNS) // Exposed On Socket
   mux.HandleFunc("/ws", router.HandleIncoming) // WebSocket Handler
 
   go listen(mux)
@@ -597,10 +789,32 @@ func create_server() {
   unlink_chan := make(chan * inc.INCMessage)
   connectlist_chan := make(chan * inc.INCMessage)
 
+  append_chan := make(chan * inc.INCMessage)
+  peak_chan := make(chan * inc.INCMessage)
+  rename_chan := make(chan * inc.INCMessage)
+  create_chan := make(chan * inc.INCMessage)
+
+  mkdir_chan := make(chan * inc.INCMessage)
+  rmdir_chan := make(chan * inc.INCMessage)
+  truncate_chan := make(chan * inc.INCMessage)
+  utimens_chan := make(chan * inc.INCMessage)
+
   // Can Request Across Other Nodes
   router.On("READ", read_chan)
   router.On("WRITE", write_chan)
   router.On("UNLINK", unlink_chan)
+
+  router.On("APPEND", append_chan)
+  router.On("PEAK", peak_chan)
+
+  router.On("RENAME", rename_chan)
+  router.On("CREATE", create_chan)
+  router.On("MKDIR", mkdir_chan)
+  router.On("RMDIR", rmdir_chan)
+
+  router.On("TRUNCATE", truncate_chan)
+  router.On("UTIMENS", utimens_chan)
+
 
   // Invalidate cache
   router.On("INVALIDATE", invalidation_chan)
@@ -625,6 +839,22 @@ func create_server() {
         go ws_read(msg)
       case msg := <- write_chan:
         go ws_write(msg)
+      case msg := <- append_chan:
+        go ws_append(msg)
+      case msg := <- peak_chan:
+        go ws_peak(msg)
+      case msg := <- rename_chan:
+        go ws_rename(msg)
+      case msg := <- create_chan:
+        go ws_create(msg)
+      case msg := <- mkdir_chan:
+        go ws_mkdir(msg)
+      case msg := <- rmdir_chan:
+        go ws_rmdir(msg)
+      case msg := <- truncate_chan:
+        go ws_truncate(msg)
+      case msg := <- utimens_chan:
+        go ws_utimens(msg)
     }
   }
 }
