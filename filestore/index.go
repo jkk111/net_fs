@@ -571,6 +571,7 @@ func (this * FileStore) Truncate(user string, name string, size int64) {
 }
 
 func (this * FileStore) Readdir(user string, name string) (*Error, []string) {
+  fmt.Printf("Readdir: User: %s, Name: %s", user, name)
   file := this.Entries.Users[user].NameEntries[name]
 
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
