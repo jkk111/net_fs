@@ -571,12 +571,13 @@ func (this * FileStore) Truncate(user string, name string, size int64) {
 }
 
 func (this * FileStore) Readdir(user string, name string) (*Error, []string) {
-  fmt.Printf("Readdir: User: %s, Name: %s", user, name)
+  fmt.Printf("Readdir: User: %s, Name: %s\n", user, name)
   file := this.Entries.Users[user].NameEntries[name]
 
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
 
   if file == nil {
+    fmt.Println(this.Entries.Users)
     fmt.Println(file)
     return ENOENT, nil
   } else if !file.Dir {
