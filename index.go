@@ -240,6 +240,7 @@ func Read(w http.ResponseWriter, req * http.Request) {
 
   fmt.Printf("Read Length: %s Position: %d, Have: %d, Buf: %d, Want: %d\n", name, offset, file.Size, len(data), length)
   w.Write(data)
+  fmt.Println("Wrote Response")
 }
 
 func Write(w http.ResponseWriter, req * http.Request) {
