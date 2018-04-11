@@ -8,6 +8,7 @@ import (
   "net/http"
   "io/ioutil"
   "time"
+  "sync"
   "encoding/json"
   "github.com/gorilla/websocket"
   "github.com/satori/go.uuid"
@@ -49,6 +50,7 @@ func (this * INCMessage) Serialize() []byte {
 }
 
 type INCNode struct {
+  *sync.Mutex
   Id []byte
   router * INCRouter
   conn * websocket.Conn
@@ -205,7 +207,9 @@ func (this * INCNode) Close() {
 }
 
 func (this * INCNode) Send(message * INCMessage) {
+  this.Lock()
   this.conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
+  this.Unlock()
 }
 
 func (this * INCNode) handleMessages() {
@@ -314,7 +318,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   conn.SetReadDeadline(time.Time{})
 
-  node := &INCNode{ id, this, conn, this.mchan }
+  node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
   this.nodes[string(id)] = node
   go node.handleMessages()
 }
@@ -370,7 +374,7 @@ func (this * INCRouter) connect(url string) {
   fmt.Println("Successful Handshake", id)
 
   conn.SetReadDeadline(time.Time{})
-  node := &INCNode{ id, this, conn, this.mchan }
+  node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
   this.nodes[string(id)] = node
 
   go node.handleMessages()
