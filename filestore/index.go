@@ -577,7 +577,7 @@ func (this * FileStore) Readdir(user string, name string) (*Error, []string) {
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
 
   if file == nil {
-    fmt.Println(this.Entries.Users[user])
+    fmt.Printf("%+v\n", this.Entries.Users[user])
     fmt.Println(file)
     return ENOENT, nil
   } else if !file.Dir {
