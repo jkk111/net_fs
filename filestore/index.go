@@ -572,7 +572,7 @@ func (this * FileStore) Truncate(user string, name string, size int64) {
 
 func (this * FileStore) Readdir(user string, name string) (*Error, []string) {
   fmt.Printf("Readdir: User: %s, Name: %s\n", user, name)
-  file := this.Entries.Users[user].NameEntries[name]
+  file := this.LatestName(user, name)
 
   // fmt.Println(name, file.Id, file.Parent, file.Dir, file)
 
