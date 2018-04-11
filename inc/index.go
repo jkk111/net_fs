@@ -237,7 +237,7 @@ func (this * INCRouter) handleMessages() {
     time.Sleep(time.Second)
     fmt.Println("awaiting!")
     msg := this.Receive()
-    fmt.Println("Here", msg)
+    // fmt.Println("Here", msg)
     _ = msg.sender.Id
 
     mid := string(msg.Mid)
@@ -289,7 +289,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
     return
   }
 
-  fmt.Println(m)
+  // fmt.Println(m)
 
   parsed := ParseMessage(m)
 

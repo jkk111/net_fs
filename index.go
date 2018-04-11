@@ -336,7 +336,7 @@ func Stat(w http.ResponseWriter, req * http.Request) {
   } else {
     buf, _ := json.Marshal(&file)
 
-    fmt.Println("Stated", buf)
+    fmt.Println("Stated")
 
     w.Write(buf)
   }
@@ -402,8 +402,6 @@ func Readdir(w http.ResponseWriter, req * http.Request) {
     }
     return
   }
-
-  fmt.Println("Readdir", request.Name, contents)
 
   buf, err := json.Marshal(&contents)
 
