@@ -252,6 +252,7 @@ func (this * INCNode) Close() {
 
 func (this * INCNode) Send(message * INCMessage) {
   this.Lock()
+  fmt.Printf("Sending Message To %s\n", string(this.Id))
   this.conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   this.Unlock()
 }
