@@ -300,7 +300,7 @@ func Read(w http.ResponseWriter, req * http.Request) {
   length := request.Length
   var data []byte
 
-  fmt.Printf("%+v\n", file)
+  fmt.Printf("%+v\n", store.Entries)
 
   if file.Remote {
     data = read_remote(file.RemoteHost, request)
