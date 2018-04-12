@@ -286,7 +286,7 @@ func Read(w http.ResponseWriter, req * http.Request) {
   store.CreateUser(user)
 
   if file == nil {
-    fmt.Println("File Not Found")
+    fmt.Println("File Not Found", name)
     w.WriteHeader(http.StatusNotFound)
     w.Write(ENOENT)
     return
