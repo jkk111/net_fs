@@ -190,7 +190,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
   ws := float64(filestore.WRITE_SIZE)
 
   start := read_request.Offset
-  end := start + read_request.Length
+  end := int64(math.Min(float64(start + read_request.Length), float64(file.Size)))
 
   start_f := float64(start)
   end_f := float64(end)
