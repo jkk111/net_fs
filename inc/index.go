@@ -295,7 +295,7 @@ func (this * INCRouter) handleMessages() {
     fmt.Println("awaiting!")
     msg := this.Receive()
 
-    fmt.Println("Received Message %s (%s)", string(msg.Mid), msg.Type)
+    fmt.Printf("Received Message %s (%s)\n", string(msg.Mid), msg.Type)
 
     // fmt.Println("Here", msg)
     _ = msg.sender.Id
