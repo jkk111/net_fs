@@ -190,6 +190,8 @@ func (this * INCRouter) BootstrapNodes(bootstrap []string) {
     if !exists {
       success, retry := this.connect(node)
 
+      fmt.Printf("Connecting Success: %d, retry %d", success, retry)
+
       if success {
         this.Bootstrap = append(this.Bootstrap, node)
       } else if retry {
@@ -256,7 +258,7 @@ func (this * INCNode) Close() {
 
 func (this * INCNode) Send(message * INCMessage) {
   this.Lock()
-  fmt.Printf("Sending Message To %s (%s)\n", string(this.Id), this.conn.RemoteAddr)
+  fmt.Printf("Sending Message To %s (%s)\n", string(this.Id), this.conn.RemoteAddr())
   this.conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   this.Unlock()
 }
@@ -278,9 +280,11 @@ func (this * INCNode) handleMessages() {
   }
 
   for {
+    fmt.Println("Waiting for message from:", string(this.Id))
     t, m, err := this.conn.ReadMessage()
 
     if t != MESSAGE_TYPE || err != nil {
+      fmt.Println("Failed To Parse Incoming Message!")
       this.Close()
       return
     }
@@ -500,6 +504,7 @@ func (this * INCRouter) Emit(message * INCMessage) {
 func (this * INCRouter) Send(node string, message * INCMessage) {
   message.Id = this.Id
 
+  fmt.Println("Self ID", string(message.Id))
 
   fmt.Println("Locking To Send")
   this.records_mutex.Lock()
