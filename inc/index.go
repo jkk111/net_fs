@@ -190,7 +190,7 @@ func (this * INCRouter) BootstrapNodes(bootstrap []string) {
     if !exists {
       success, retry := this.connect(node)
 
-      fmt.Printf("Connecting Success: %t, retry %t", success, retry)
+      fmt.Printf("Connecting Success: %t, retry %t\n", success, retry)
 
       if success {
         this.Bootstrap = append(this.Bootstrap, node)
@@ -452,6 +452,7 @@ func (this * INCRouter) connect(url string) (success bool, retry bool) {
   id := shello.Id
 
   if string(id) == string(this.Id) {
+    fmt.Println("Oops Connected To Self")
     conn.Close()
     return false, false
   }
