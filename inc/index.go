@@ -510,7 +510,7 @@ func (this * INCRouter) Emit(message * INCMessage) {
 
 func (this * INCRouter) Send(node string, message * INCMessage) {
   if message.Id == nil || len(message.Id) == 0 {
-    message.Id = this.ID
+    message.Id = this.Id
   }
 
   fmt.Println("Self ID", string(message.Id))
