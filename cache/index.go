@@ -13,7 +13,7 @@ type CachePage struct {
 }
 
 type Cache struct {
-  *sync.Mutex
+  mutex * sync.Mutex
   Pages map[string]*CachePage
   Blocks []*CacheEntry
   Size int64
@@ -24,6 +24,7 @@ func NewCache(size int64) * Cache {
   blocks := make([]*CacheEntry, size)
 
   return &Cache{
+    mutex: sync.Mutex{},
     Pages: pages,
     Blocks: blocks,
     Size: size,
@@ -52,8 +53,8 @@ func (this * Cache) shift(before int64) {
 }
 
 func (this * Cache) Add(page string, block int64, data []byte) {
-  this.Lock()
-  defer this.Unlock()
+  this.mutex.Lock()
+  defer this.mutex.Unlock()
   this.add_page(page)
 
   if this.Pages[page].Blocks[block] != nil {
@@ -79,8 +80,8 @@ func (this * Cache) Add(page string, block int64, data []byte) {
 }
 
 func (this * Cache) Get(page string, block int64) []byte {
-  this.Lock()
-  defer this.Unlock()
+  this.mutex.Lock()
+  defer this.mutex.Unlock()
   this.add_page(page)
 
   file := this.Pages[page]
