@@ -213,7 +213,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
       request := Serialize(&ReadRequest{
         User: read_request.User,
         Name: read_request.Name,
-        Offset: start_chunk * filestore.WRITE_SIZE,
+        Offset: i * filestore.WRITE_SIZE,
         Length: filestore.WRITE_SIZE,
       })
 
