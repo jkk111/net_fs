@@ -205,6 +205,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
   written := 0
 
   for i := start_chunk; i <= end_chunk; i++ {
+    fmt.Printf("Getting Chunks %d => %d => %d\n", start_chunk, i, end_chunk)
     is_eof := false
     data := hot_cache.Get(file.Id, i)
 
@@ -224,7 +225,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
       fmt.Printf("Sent Read Request to %s (%s)\n", remote, string(message.Mid))
       resp := <- resp_ch
 
-      fmt.Println("Read Response", len(resp.Message))
+      fmt.Println("Received Read Response", len(resp.Message))
       fmt.Println("Adding To Cache")
       hot_cache.Add(file.Id, i, resp.Message)
 

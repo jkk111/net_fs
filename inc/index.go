@@ -320,11 +320,11 @@ func (this * INCRouter) handleMessages() {
     rid := string(msg.Rid)
 
     if this.awaiting[rid] != nil {
-      fmt.Printf("Locking Await Mutex")
+      fmt.Printf("Locking Await Mutex\n")
       this.await_mutex.Lock()
       ln := this.awaiting[rid]
       delete(this.awaiting, rid)
-      fmt.Printf("Removing Await")
+      fmt.Printf("Removing Await\n")
       this.await_mutex.Unlock()
       ln <- msg
       continue
