@@ -173,6 +173,8 @@ func NewINCRouter(port string) * INCRouter {
 }
 
 func (this * INCRouter) BootstrapNodes(bootstrap []string) {
+  fmt.Println("Bootstrap")
+
   for _, node := range bootstrap {
     exists := false
     for _, bootstrapped := range this.Bootstrap {
@@ -233,7 +235,7 @@ func (this * INCRouter) clearRecords() {
 func (this * INCRouter) On(evt string, ch chan * INCMessage) {
   this.mutex.Lock()
   this.handlers[evt] = ch
-  this.mutex.Lock()
+  this.mutex.Unlock()
 }
 
 func (this * INCRouter) OnConnect(f func(*INCNode)) {
