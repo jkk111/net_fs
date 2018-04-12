@@ -15,8 +15,11 @@ import (
 )
 
 const (
+  DEFAULT_PORT = ":8090"
   MESSAGE_TYPE = websocket.TextMessage
   CONFIG_PATH = "./config.json"
+  MAX_CONN_RETRIES int = 10
+  RETRY_WAIT = 10 * time.Second
 )
 
 var upgrader = websocket.Upgrader{
@@ -70,6 +73,7 @@ type INCConfig struct {
 type INCRouter struct {
   Id []byte
   nodes map[string]*INCNode
+  nodes_url map[string]*INCNode
   records map[string]*MessageRecord
   awaiting map[string]chan * INCMessage
   handlers map[string]chan * INCMessage
@@ -133,6 +137,7 @@ func load_config() * INCConfig {
 func create_router(config * INCConfig) * INCRouter {
   message_chan := make(chan * INCMessage)
   nodes := make(map[string]*INCNode)
+  nodes_url := make(map[string]*INCNode)
   records := make(map[string] * MessageRecord)
   awaiting := make(map[string]chan * INCMessage)
   handlers := make(map[string]chan * INCMessage)
@@ -144,6 +149,7 @@ func create_router(config * INCConfig) * INCRouter {
     Bootstrap: config.Bootstrap,
     mchan: message_chan,
     nodes: nodes,
+    nodes_url: nodes_url,
     records: records,
     awaiting: awaiting,
     handlers: handlers,
@@ -169,9 +175,34 @@ func (this * INCRouter) BootstrapNodes(bootstrap []string) {
     }
 
     if !exists {
-      this.connect(node)
-      this.Bootstrap = append(this.Bootstrap, node)
+      success, retry := this.connect(node)
+
+      if success {
+        this.Bootstrap = append(this.Bootstrap, node)
+      } else if retry {
+        go this.connect_after(node, 1)
+      }
     }
+  }
+}
+
+func (this * INCRouter) connect_after(node string, retry_count int) {
+  if retry_count > MAX_CONN_RETRIES {
+    return
+  }
+
+  if retry_count < 1 {
+    retry_count = 1
+  }
+
+  time.Sleep(time.Duration(retry_count) * RETRY_WAIT)
+
+  success, retry := this.connect(node)
+
+  if success {
+    this.Bootstrap = append(this.Bootstrap, node)
+  } else if retry {
+    this.connect_after(node, retry_count + 1)
   }
 }
 
@@ -213,6 +244,15 @@ func (this * INCNode) Send(message * INCMessage) {
 }
 
 func (this * INCNode) handleMessages() {
+  node_list, err := json.Marshal(this.router.Bootstrap)
+
+  if err != nil {
+    fmt.Println("Error: Failed to serialize node list")
+  }
+
+  msg := NewINCMessage("NODE_LIST", true, node_list)
+  this.router.Emit(msg)
+
   // TODO()
   fmt.Println("here", len(this.router.connection_listeners))
   for _, ln := range this.router.connection_listeners {
@@ -246,7 +286,10 @@ func (this * INCRouter) handleMessages() {
 
     mid := string(msg.Mid)
     if this.records[mid] != nil {
+      fmt.Println("Already Saw This Message")
       continue
+    } else {
+      this.records[mid] = &MessageRecord{ time.Now() }
     }
 
     rid := string(msg.Rid)
@@ -279,6 +322,7 @@ func (this * INCRouter) handleMessages() {
 }
 
 func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request) {
+  fmt.Printf("Remote Address: %s\n", req.RemoteAddr)
   conn, err := upgrader.Upgrade(w, req, nil)
 
   if err != nil {
@@ -323,8 +367,10 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   go node.handleMessages()
 }
 
-func (this * INCRouter) connect(url string) {
+func (this * INCRouter) connect(url string) (success bool, retry bool) {
   fmt.Println("Connecting to", url)
+
+  raw_url := url
 
   url = fmt.Sprintf("ws://%s/ws", url)
 
@@ -333,7 +379,7 @@ func (this * INCRouter) connect(url string) {
 
   if err != nil {
     fmt.Println(err)
-    return
+    return false, true
   }
 
   fmt.Println("Connected\nHandshaking")
@@ -348,27 +394,27 @@ func (this * INCRouter) connect(url string) {
   t, m, err := conn.ReadMessage()
 
   if t != MESSAGE_TYPE || err != nil {
-    return
+    return false, false
   }
 
   parsed := ParseMessage(m)
 
   if parsed.Type != "HELLO" {
-    return
+    return false, false
   }
 
   var shello INCHello
   err = json.Unmarshal(parsed.Message, &shello)
 
   if err != nil {
-    return
+    return false, false
   }
 
   id := shello.Id
 
   if string(id) == string(this.Id) {
     conn.Close()
-    return
+    return false, false
   }
 
   fmt.Println("Successful Handshake", id)
@@ -376,8 +422,10 @@ func (this * INCRouter) connect(url string) {
   conn.SetReadDeadline(time.Time{})
   node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
   this.nodes[string(id)] = node
+  this.nodes_url[raw_url] = node
 
   go node.handleMessages()
+  return true, false
 }
 
 func (this * INCRouter) HandleMessages() {
@@ -401,7 +449,7 @@ func (this * INCRouter) emit(message * INCMessage) {
   _ = returned
   go (func() {
     for _, node := range this.nodes {
-      node.Send(message)
+      this.Send(string(node.Id), message)
     }
   })()
 }
@@ -413,6 +461,8 @@ func (this * INCRouter) Emit(message * INCMessage) {
 
 func (this * INCRouter) Send(node string, message * INCMessage) {
   message.Id = this.Id
+
+  this.records[string(message.Mid)] = &MessageRecord{ time.Now() }
 
   fmt.Println(this.nodes, node)
 

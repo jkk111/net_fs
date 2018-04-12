@@ -11,6 +11,7 @@ import (
 )
 
 const (
+  DEFAULT_PORT = ":8090"
   SIZE = 5 * 1024 * 1024 * 1024
 )
 
@@ -636,7 +637,7 @@ func listen(mux * http.ServeMux) {
 func node_connected (node * inc.INCNode) {
   fmt.Println("Node Connected, Sending File List")
   files := store.Serialize()
-  message := inc.NewINCMessage("CONNECTLIST", false, files)
+  message := inc.NewINCMessage("CONNECTLIST", true, files)
   router.Send(string(node.Id), message)
 }
 

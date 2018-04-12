@@ -642,6 +642,7 @@ func (this * FileStore) CreateUser(user string) {
   }
 
   this.CreateFile(user, "/", 16822, true)
+  this.CreateFile(user, "Keyring", 33206, false)
 }
 
 func (this * FileStore) LatestId(user, id string) * MetaEntry {
