@@ -224,7 +224,11 @@ func read_remote(remote string, read_request ReadRequest) []byte {
       fmt.Println("Sent Read Request")
       resp := <- resp_ch
 
+      fmt.Println("Read Response", len(resp.Message))
+      fmt.Println("Adding To Cache")
       hot_cache.Add(file.Id, i, resp.Message)
+
+      data = resp.Message
 
       if int64(len(resp.Message)) < filestore.WRITE_SIZE {
         is_eof = true
