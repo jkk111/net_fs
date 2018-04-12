@@ -221,7 +221,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
       resp_ch := make(chan * inc.INCMessage)
       router.Await(string(message.Mid), resp_ch)
       router.Send(remote, message)
-      fmt.Println("Sent Read Request")
+      fmt.Println("Sent Read Request", string(message.Mid))
       resp := <- resp_ch
 
       fmt.Println("Read Response", len(resp.Message))

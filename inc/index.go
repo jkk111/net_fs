@@ -287,7 +287,7 @@ func (this * INCRouter) handleMessages() {
 
     mid := string(msg.Mid)
     if this.records[mid] != nil {
-      fmt.Println("Already Saw This Message")
+      fmt.Println("Already Saw This Message", string(msg.Mid))
       continue
     } else {
       this.records[mid] = &MessageRecord{ time.Now() }
