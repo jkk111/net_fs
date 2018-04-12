@@ -7,6 +7,7 @@ import (
   "os"
   "net/http"
   "io/ioutil"
+  "strings"
   "time"
   "sync"
   "encoding/json"
@@ -323,6 +324,10 @@ func (this * INCRouter) handleMessages() {
 
 func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request) {
   fmt.Printf("Remote Address: %s\n", req.RemoteAddr)
+
+  request_parts := strings.Split(req.RemoteAddr, ":")
+  remote_url := request_parts[0] + DEFAULT_PORT
+
   conn, err := upgrader.Upgrade(w, req, nil)
 
   if err != nil {
@@ -364,6 +369,10 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
 
   node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
   this.nodes[string(id)] = node
+  this.nodes_url[remote_url] = node
+
+  this.Bootstrap = append(this.Bootstrap, remote_url)
+
   go node.handleMessages()
 }
 
