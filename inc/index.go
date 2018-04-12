@@ -340,8 +340,6 @@ func (this * INCRouter) handleMessages() {
 }
 
 func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request) {
-  fmt.Printf("Remote Address: %s\n", req.RemoteAddr)
-
   request_parts := strings.Split(req.RemoteAddr, ":")
   remote_url := request_parts[0] + DEFAULT_PORT
 
@@ -383,6 +381,8 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
 
   conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   conn.SetReadDeadline(time.Time{})
+
+  fmt.Printf("Remote Address: %s %s\n", req.RemoteAddr, string(id))
 
   node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
   this.conn_mutex.Lock()
