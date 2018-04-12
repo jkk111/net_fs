@@ -13,6 +13,7 @@ import(
 )
 
 const SIZE = 1024 * 1024
+const WRITE_SIZE = dumbstore.WRITE_SIZE
 
 type Error struct {
   Code string

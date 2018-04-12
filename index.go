@@ -2,11 +2,13 @@ package main
 
 import (
   "./inc"
+  "./cache"
   "./filestore"
   "fmt"
   "encoding/json"
   "net/http"
   "io"
+  "math"
   // "io/ioutil"
 )
 
@@ -23,6 +25,7 @@ var (
   ENOENT = json_error("ENOENT")
   ENOTDIR = json_error("ENOTDIR")
   router * inc.INCRouter = inc.NewINCRouter(":8080")
+  hot_cache = cache.NewCache(1024)
 )
 
 func json_error(etype string) []byte {
@@ -182,17 +185,76 @@ func write_remote(remote string, write_request WriteRequest) {
 }
 
 func read_remote(remote string, read_request ReadRequest) []byte {
-  request := Serialize(read_request)
-  message := inc.NewINCMessage("READ", false, request)
+  file := store.LatestName(read_request.User, read_request.Name)
 
-  resp_ch := make(chan * inc.INCMessage)
-  router.Await(string(message.Mid), resp_ch)
-  router.Send(remote, message)
-  fmt.Println("Sent Read Request")
-  resp := <- resp_ch
-  fmt.Println("Received Read Response", len(resp.Message))
+  ws := float64(filestore.WRITE_SIZE)
 
-  return resp.Message
+  start := read_request.Offset
+  end := start + read_request.Length
+
+  start_f := float64(start)
+  end_f := float64(end)
+
+  start_off := read_request.Offset % filestore.WRITE_SIZE
+
+  start_chunk := int64(math.Floor(start_f / ws) * ws)
+  end_chunk := int64(math.Ceil(end_f / ws) * ws)
+
+  buf := make([]byte, read_request.Length)
+
+  written := 0
+
+  for i := start_chunk; i <= end_chunk; i++ {
+    is_eof := false
+    data := hot_cache.Get(file.Id, i)
+
+    if data == nil {
+      request := Serialize(&ReadRequest{
+        User: read_request.User,
+        Name: read_request.Name,
+        Offset: start_chunk * filestore.WRITE_SIZE,
+        Length: filestore.WRITE_SIZE,
+      })
+
+      message := inc.NewINCMessage("READ", false, request)
+
+      resp_ch := make(chan * inc.INCMessage)
+      router.Await(string(message.Mid), resp_ch)
+      router.Send(remote, message)
+      fmt.Println("Sent Read Request")
+      resp := <- resp_ch
+
+      hot_cache.Add(file.Id, i, resp.Message)
+
+      if int64(len(resp.Message)) < filestore.WRITE_SIZE {
+        is_eof = true
+      }
+    }
+
+    if i == start {
+      data = data[start_off:]
+    }
+
+    written += copy(buf[written:], data)
+
+    if is_eof {
+      break
+    }
+  }
+
+  return buf
+
+  // request := Serialize(read_request)
+  // message := inc.NewINCMessage("READ", false, request)
+
+  // resp_ch := make(chan * inc.INCMessage)
+  // router.Await(string(message.Mid), resp_ch)
+  // router.Send(remote, message)
+  // fmt.Println("Sent Read Request")
+  // resp := <- resp_ch
+  // fmt.Println("Received Read Response", len(resp.Message))
+
+  // return resp.Message
 }
 
 func remote_peak(remote string, peak_request PeakRequest) []byte {
