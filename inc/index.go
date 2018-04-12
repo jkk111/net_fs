@@ -81,10 +81,14 @@ type INCRouter struct {
   connection_listeners []func(*INCNode)
   Bootstrap []string
   mchan chan * INCMessage
+  conn_mutex * sync.Mutex
+  mutex * sync.Mutex
 }
 
 func (this * INCRouter) Await(mid string, ch chan * INCMessage) {
+  this.mutex.Lock()
   this.awaiting[mid] = ch
+  this.mutex.Unlock()
 }
 
 func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
@@ -155,6 +159,8 @@ func create_router(config * INCConfig) * INCRouter {
     awaiting: awaiting,
     handlers: handlers,
     connection_listeners: connection_listeners,
+    mutex: &sync.Mutex{},
+    conn_mutex: &sync.Mutex{},
   }
 
   return router
@@ -216,14 +222,18 @@ func (this * INCRouter) clearRecords() {
     time.Sleep(5 * time.Minute)
     for key, record := range this.records {
       if time.Since(record.received) > 5 * time.Minute {
+        this.mutex.Lock()
         delete(this.records, key)
+        this.mutex.Unlock()
       }
     }
   }
 }
 
 func (this * INCRouter) On(evt string, ch chan * INCMessage) {
+  this.mutex.Lock()
   this.handlers[evt] = ch
+  this.mutex.Lock()
 }
 
 func (this * INCRouter) OnConnect(f func(*INCNode)) {
@@ -300,7 +310,9 @@ func (this * INCRouter) handleMessages() {
 
     if this.awaiting[rid] != nil {
       ln := this.awaiting[rid]
+      this.mutex.Lock()
       delete(this.awaiting, rid)
+      this.mutex.Unlock()
       ln <- msg
       continue
     }
@@ -371,8 +383,10 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   conn.SetReadDeadline(time.Time{})
 
   node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
+  this.conn_mutex.Lock()
   this.nodes[string(id)] = node
   this.nodes_url[remote_url] = node
+  this.conn_mutex.Unlock()
 
   this.Bootstrap = append(this.Bootstrap, remote_url)
 
@@ -433,8 +447,11 @@ func (this * INCRouter) connect(url string) (success bool, retry bool) {
 
   conn.SetReadDeadline(time.Time{})
   node := &INCNode{ &sync.Mutex{}, id, this, conn, this.mchan }
+
+  this.conn_mutex.Lock()
   this.nodes[string(id)] = node
   this.nodes_url[raw_url] = node
+  this.conn_mutex.Unlock()
 
   go node.handleMessages()
   return true, false
@@ -473,9 +490,9 @@ func (this * INCRouter) Emit(message * INCMessage) {
 
 func (this * INCRouter) Send(node string, message * INCMessage) {
   message.Id = this.Id
-
+  this.mutex.Lock()
   this.records[string(message.Mid)] = &MessageRecord{ time.Now() }
-
+  this.mutex.Unlock()
   fmt.Println(this.nodes, node)
 
   this.nodes[node].Send(message)
