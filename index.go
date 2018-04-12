@@ -750,6 +750,7 @@ func ws_read(m * inc.INCMessage) {
   var data []byte
 
   if file.Remote {
+    fmt.Println("WS PROXY READ", file)
     data = read_remote(file.RemoteHost, request)
   } else {
     data = read(file.Id, offset, length)
