@@ -493,9 +493,13 @@ func (this * INCRouter) Emit(message * INCMessage) {
 
 func (this * INCRouter) Send(node string, message * INCMessage) {
   message.Id = this.Id
+
+
+  fmt.Println("Locking To Send")
   this.mutex.Lock()
   this.records[string(message.Mid)] = &MessageRecord{ time.Now() }
   this.mutex.Unlock()
+  fmt.Println("Unlocking Send")
   fmt.Println(this.nodes, node)
 
   this.nodes[node].Send(message)
