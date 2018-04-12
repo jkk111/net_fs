@@ -24,7 +24,7 @@ func NewCache(size int64) * Cache {
   blocks := make([]*CacheEntry, size)
 
   return &Cache{
-    mutex: sync.Mutex{},
+    mutex: &sync.Mutex{},
     Pages: pages,
     Blocks: blocks,
     Size: size,
