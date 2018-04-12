@@ -724,6 +724,9 @@ func ws_unlink(msg * inc.INCMessage) {
 }
 
 func ws_connect_list(m * inc.INCMessage) {
+  fmt.Printf("%s %s\n", string(m.Id), string(m.Message))
+
+
   store.ParseRemote(string(m.Id), m.Message)
 }
 
