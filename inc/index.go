@@ -82,13 +82,15 @@ type INCRouter struct {
   Bootstrap []string
   mchan chan * INCMessage
   conn_mutex * sync.Mutex
-  mutex * sync.Mutex
+  records_mutex * sync.Mutex
+  await_mutex * sync.Mutex
+  handler_mutex * sync.Mutex
 }
 
 func (this * INCRouter) Await(mid string, ch chan * INCMessage) {
-  this.mutex.Lock()
+  this.await_mutex.Lock()
   this.awaiting[mid] = ch
-  this.mutex.Unlock()
+  this.await_mutex.Unlock()
 }
 
 func NewINCMessage(m_type string, echo bool, message []byte) *INCMessage {
@@ -159,8 +161,10 @@ func create_router(config * INCConfig) * INCRouter {
     awaiting: awaiting,
     handlers: handlers,
     connection_listeners: connection_listeners,
-    mutex: &sync.Mutex{},
     conn_mutex: &sync.Mutex{},
+    records_mutex: &sync.Mutex{},
+    await_mutex: &sync.Mutex{},
+    handler_mutex: &sync.Mutex{},
   }
 
   return router
@@ -222,20 +226,20 @@ func (this * INCRouter) connect_after(node string, retry_count int) {
 func (this * INCRouter) clearRecords() {
   for {
     time.Sleep(5 * time.Minute)
+    this.records_mutex.Lock()
     for key, record := range this.records {
       if time.Since(record.received) > 5 * time.Minute {
-        this.mutex.Lock()
         delete(this.records, key)
-        this.mutex.Unlock()
       }
     }
+    this.records_mutex.Unlock()
   }
 }
 
 func (this * INCRouter) On(evt string, ch chan * INCMessage) {
-  this.mutex.Lock()
+  this.handler_mutex.Lock()
   this.handlers[evt] = ch
-  this.mutex.Unlock()
+  this.handler_mutex.Unlock()
 }
 
 func (this * INCRouter) OnConnect(f func(*INCNode)) {
@@ -252,7 +256,7 @@ func (this * INCNode) Close() {
 
 func (this * INCNode) Send(message * INCMessage) {
   this.Lock()
-  fmt.Printf("Sending Message To %s\n", string(this.Id))
+  fmt.Printf("Sending Message To %s (%s)\n", string(this.Id), this.conn.RemoteAddr)
   this.conn.WriteMessage(MESSAGE_TYPE, message.Serialize())
   this.Unlock()
 }
@@ -312,10 +316,12 @@ func (this * INCRouter) handleMessages() {
     rid := string(msg.Rid)
 
     if this.awaiting[rid] != nil {
+      fmt.Printf("Locking Await Mutex")
+      this.await_mutex.Lock()
       ln := this.awaiting[rid]
-      this.mutex.Lock()
       delete(this.awaiting, rid)
-      this.mutex.Unlock()
+      fmt.Printf("Removing Await")
+      this.await_mutex.Unlock()
       ln <- msg
       continue
     }
@@ -496,9 +502,9 @@ func (this * INCRouter) Send(node string, message * INCMessage) {
 
 
   fmt.Println("Locking To Send")
-  this.mutex.Lock()
+  this.records_mutex.Lock()
   this.records[string(message.Mid)] = &MessageRecord{ time.Now() }
-  this.mutex.Unlock()
+  this.records_mutex.Unlock()
   fmt.Println("Unlocking Send")
   fmt.Println(this.nodes, node)
 
