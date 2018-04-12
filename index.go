@@ -34,8 +34,7 @@ func json_error(etype string) []byte {
 }
 
 type InvalidationRequest struct {
-  Name string `json:"name"`
-  User string `json:"user"`
+  Id string `json:"id"`
   Version int64 `json:"version"`
 }
 
@@ -129,6 +128,13 @@ type UTimeNSRequest struct {
   Version int64 `json:"version"`
 }
 
+func invalidate(id string, min_version int64) {
+  invalidate := &InvalidationRequest { id, min_version }
+  request := Serialize(invalidate)
+  message := inc.NewINCMessage("INVALIDATE", true, request)
+  router.Emit(message)
+}
+
 func init() {
   store = filestore.NewFileStore("netfs", SIZE)
 }
@@ -175,7 +181,9 @@ func read(id string, offset, length int64) []byte {
 }
 
 func write(id string, offset int64, buf []byte) {
+  file := store.Entries.FromId(id)
   store.Write(id, offset, buf)
+  invalidate(id, file.Version)
 }
 
 func write_remote(remote string, write_request WriteRequest) {
@@ -714,6 +722,10 @@ func node_connected (node * inc.INCNode) {
 func ws_invalidate(msg * inc.INCMessage) {
   var request InvalidationRequest
   MessageFromBuf(msg.Message, &request)
+
+  id := request.Id
+  hot_cache.Purge(id)
+
   fmt.Printf("TODO WS_INVALIDATE%+v\n", request)
 }
 

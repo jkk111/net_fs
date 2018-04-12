@@ -134,8 +134,8 @@ func NewEntrySet(entries []*MetaEntry, remote bool) * EntrySet {
   return set
 }
 
-func (this * EntrySet) FromId(user string, id string) * MetaEntry {
-  return this.Users[user].IdEntries[id]
+func (this * EntrySet) FromId(id string) * MetaEntry {
+  return this.IdEntries[id]
 }
 
 func (this * EntrySet) FromName(user string, name string) * MetaEntry {

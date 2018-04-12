@@ -38,6 +38,20 @@ func (this * Cache) add_page(page string) {
   }
 }
 
+func (this * Cache) Purge(page string) {
+  this.mutex.Lock()
+  defer this.mutex.Unlock()
+
+  file := this.Pages[page]
+
+  for _, index := range file.Blocks {
+    this.Blocks = append(this.Blocks[:*index], this.Blocks[*index + 1:]...)
+    delete(this.Pages, page)
+  }
+
+  this.add_page(page)
+}
+
 func (this * Cache) shift(before int64) {
   for _, page := range this.Pages {
     for block, val := range page.Blocks {
