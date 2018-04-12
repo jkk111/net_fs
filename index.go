@@ -247,7 +247,7 @@ func read_remote(remote string, read_request ReadRequest) []byte {
     }
   }
 
-  return buf
+  return buf[:written]
 
   // request := Serialize(read_request)
   // message := inc.NewINCMessage("READ", false, request)
