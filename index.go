@@ -197,8 +197,8 @@ func read_remote(remote string, read_request ReadRequest) []byte {
 
   start_off := read_request.Offset % filestore.WRITE_SIZE
 
-  start_chunk := int64(math.Floor(start_f / ws) * ws)
-  end_chunk := int64(math.Ceil(end_f / ws) * ws)
+  start_chunk := int64(math.Floor(start_f / ws))
+  end_chunk := int64(math.Ceil(end_f / ws))
 
   buf := make([]byte, read_request.Length)
 
