@@ -386,6 +386,12 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
 
   id := chello.Id
 
+  if(string(id) == string(this.Id)) {
+    fmt.Println("We're connected to ourselves, disconnecting")
+    conn.Close()
+    return
+  }
+
   shello := INCHello { this.Id }
   smsg, _ := json.Marshal(shello)
   message := NewINCMessage("HELLO", false, smsg)
