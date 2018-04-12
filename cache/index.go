@@ -1,5 +1,9 @@
 package cache
 
+import (
+  "sync"
+)
+
 type CacheEntry struct {
   data []byte
 }
@@ -9,6 +13,7 @@ type CachePage struct {
 }
 
 type Cache struct {
+  *sync.Mutex
   Pages map[string]*CachePage
   Blocks []*CacheEntry
   Size int64
@@ -47,6 +52,8 @@ func (this * Cache) shift(before int64) {
 }
 
 func (this * Cache) Add(page string, block int64, data []byte) {
+  this.Lock()
+  defer this.Unlock()
   this.add_page(page)
 
   if this.Pages[page].Blocks[block] != nil {
@@ -72,6 +79,8 @@ func (this * Cache) Add(page string, block int64, data []byte) {
 }
 
 func (this * Cache) Get(page string, block int64) []byte {
+  this.Lock()
+  defer this.Unlock()
   this.add_page(page)
 
   file := this.Pages[page]
