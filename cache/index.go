@@ -45,7 +45,7 @@ func (this * Cache) Purge(page string) {
   file := this.Pages[page]
 
   for _, index := range file.Blocks {
-    this.Blocks = append(this.Blocks[:*index], this.Blocks[*index + 1:]...)
+    this.Blocks = append(append(this.Blocks[:*index], this.Blocks[*index + 1:]...), nil)
     delete(this.Pages, page)
   }
 

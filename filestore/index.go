@@ -142,6 +142,24 @@ func (this * EntrySet) FromName(user string, name string) * MetaEntry {
   return this.Users[user].NameEntries[name]
 }
 
+func (this * EntrySet) Rename(id, updated string) {
+  if this.IdEntries[id] != nil {
+    rename := this.IdEntries[id]
+
+    user := rename.Owner
+
+    this.Remove(id)
+
+    if file := this.FromName(user, updated); file != nil {
+      this.Remove(file.Id)
+    }
+
+    rename.Name = updated
+
+    this.Add(rename)
+  }
+}
+
 type FileStore struct {
   Path string
   Size int64
@@ -646,20 +664,20 @@ func (this * FileStore) CreateUser(user string) {
   this.CreateFile(user, "Keyring", 33206, false)
 }
 
-func (this * FileStore) LatestId(user, id string) * MetaEntry {
+func (this * FileStore) LatestId(id string) * MetaEntry {
   local_version := int64(-1)
-  if this.Entries.Users[user].IdEntries[id] != nil {
-    local_version = this.Entries.Users[user].IdEntries[id].Version
+  if this.Entries.IdEntries[id] != nil {
+    local_version = this.Entries.IdEntries[id].Version
   }
 
   remote_version := int64(-1)
   best_remote := ""
 
   for remote_id, entries := range this.Remote {
-    if entries.Users[user] != nil && entries.Users[user].IdEntries[id] != nil {
-      entry := entries.Users[user].IdEntries[id]
+    if entries.IdEntries[id] != nil {
+      entry := entries.IdEntries[id]
       if entry.Version > remote_version {
-        remote_version = entries.Users[user].IdEntries[id].Version
+        remote_version = entries.IdEntries[id].Version
         best_remote = remote_id
       }
     }
@@ -703,6 +721,30 @@ func (this * FileStore) LatestName(user, name string) * MetaEntry {
     return this.Remote[best_remote].Users[user].NameEntries[name]
   } else {
     return this.Entries.Users[user].NameEntries[name]
+  }
+}
+
+func (this * FileStore) Rename(id, name string) {
+  if this.Entries.IdEntries[id] != nil {
+    this.Entries.Rename(id, name)
+  }
+
+  for _, remote := range this.Remote {
+    if remote.IdEntries[id] != nil {
+      remote.Rename(id, name)
+    }
+  }
+}
+
+func (this * FileStore) UnlinkId(id string) {
+  if this.Entries.IdEntries[id] != nil {
+    this.Entries.Remove(id)
+  }
+
+  for _, remote := range this.Remote {
+    if remote.IdEntries[id] != nil {
+      remote.Remove(id)
+    }
   }
 }
 

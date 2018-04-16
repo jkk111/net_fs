@@ -9,6 +9,8 @@ import (
   "net/http"
   "io"
   "math"
+  "time"
+  "strings"
   // "io/ioutil"
 )
 
@@ -128,6 +130,16 @@ type UTimeNSRequest struct {
   Version int64 `json:"version"`
 }
 
+type StateChange struct {
+  Id string
+  User string
+  Type string
+  Size int64
+  Mode uint16
+  Parent string
+  Name string
+}
+
 func invalidate(id string, min_version int64) {
   invalidate := &InvalidationRequest { id, min_version }
   request := Serialize(invalidate)
@@ -184,6 +196,17 @@ func write(id string, offset int64, buf []byte) {
   file := store.Entries.FromId(id)
   store.Write(id, offset, buf)
   invalidate(id, file.Version)
+
+  state_change := StateChange{
+    Id: id,
+    Size: file.Size,
+    Type: "WRITE",
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+  router.Emit(m)
 }
 
 func write_remote(remote string, write_request WriteRequest) {
@@ -353,6 +376,16 @@ func Write(w http.ResponseWriter, req * http.Request) {
 func unlink(user, name string) {
   file := store.LatestName(user, name)
   store.Unlink(file.Id)
+
+  state_change := StateChange{
+    Id: file.Id,
+    Type: "UNLINK",
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+  router.Emit(m)
 }
 
 func remote_unlink(remote string, unlink_request UnlinkRequest) {
@@ -373,6 +406,21 @@ func Create(w http.ResponseWriter, req * http.Request) {
   store.CreateUser(user)
 
   id := store.CreateFile(user, name, mode, false)
+
+  state_change := StateChange{
+    Id: id,
+    Name: name,
+    Mode: mode,
+    Type: "CREATE",
+    Parent: store.Entries.IdEntries[id].Parent,
+    User: user,
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+
+  router.Emit(m)
 
   w.Write([]byte(id))
 }
@@ -430,13 +478,54 @@ func remote_rename(remote string, rename_request RenameRequest) {
 func rename(user string, name string, updated string) {
   file := store.LatestName(user, name)
   existing := store.LatestName(user, updated)
+
   if existing != nil {
     store.Unlink(existing.Id)
   }
 
+  var parent string
+
+  index := strings.LastIndex(name, "/")
+
+  if index > -1 {
+    parent = name[:index]
+
+    if parent == "" {
+      parent = "/"
+    }
+
+    if store.Entries.Users[user].NameEntries[parent] == nil && name != "/" {
+      store.CreateFile(user, parent, 16877, true)
+    }
+
+    if parent == "/" {
+      parent = "ROOT"
+    } else {
+      parent = store.Entries.Users[user].NameEntries[parent].Id
+    }
+  } else {
+    parent = "ROOT"
+  }
+
   store.Entries.Remove(file.Id)
   file.Name = updated
+  file.Parent = parent
   store.Entries.Add(file)
+
+
+
+  state_change := StateChange{
+    Id: file.Id,
+    Name: updated,
+    Parent: file.Parent,
+    Type: "RENAME",
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+
+  router.Emit(m)
 }
 
 func Rename(w http.ResponseWriter, req * http.Request) {
@@ -518,7 +607,23 @@ func Mkdir(w http.ResponseWriter, req * http.Request) {
 
   store.CreateUser(user)
 
-  store.CreateFile(user, request.Name, request.Mode, true)
+  id := store.CreateFile(user, request.Name, request.Mode, true)
+
+  state_change := StateChange{
+    Id: id,
+    Name: request.Name,
+    Mode: request.Mode,
+    Type: "MKDIR",
+    Parent: store.Entries.IdEntries[id].Parent,
+    User: user,
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+
+  router.Emit(m)
+
 
   w.Write([]byte("OK"))
 }
@@ -539,6 +644,16 @@ func Rmdir(w http.ResponseWriter, req * http.Request) {
       remote_unlink(file.RemoteHost, UnlinkRequest(request))
     } else {
       store.Unlink(request.Name)
+
+      state_change := StateChange{
+        Id: file.Id,
+        Type: "RMDIR",
+      }
+
+      sc := Serialize(state_change)
+
+      m := inc.NewINCMessage("STATECHANGE", true, sc)
+      router.Emit(m)
     }
   }
 
@@ -554,6 +669,19 @@ func remote_truncate(remote string, truncate_request TruncateRequest) {
 func truncate(user, name string, size int64) {
   store.CreateUser(user)
   store.Truncate(user, name, size)
+
+  file := store.LatestName(user, name)
+
+  state_change := StateChange{
+    Id: file.Id,
+    Size: file.Size,
+    Type: "TRUNCATE",
+  }
+
+  sc := Serialize(state_change)
+
+  m := inc.NewINCMessage("STATECHANGE", true, sc)
+  router.Emit(m)
 }
 
 func Truncate( w http.ResponseWriter, req * http.Request) {
@@ -648,6 +776,17 @@ func Append(w http.ResponseWriter, req * http.Request) {
     remote_append(file.RemoteHost, request)
   } else {
     store.Write(file.Id, file.Size, request.Buffer)
+
+    state_change := StateChange{
+      Id: file.Id,
+      Size: file.Size,
+      Type: "APPEND",
+    }
+
+    sc := Serialize(state_change)
+
+    m := inc.NewINCMessage("STATECHANGE", true, sc)
+    router.Emit(m)
     w.Write([]byte("OK"))
   }
 }
@@ -855,6 +994,57 @@ func ws_rename(m * inc.INCMessage) {
   }
 }
 
+func state_change(m * inc.INCMessage) {
+  var state_change StateChange
+  MessageFromBuf(m.Message, &state_change)
+  sender := string(m.Id)
+  id := state_change.Id
+  user := state_change.User
+  c_type := state_change.Type
+
+  switch c_type {
+    // Remove File Entry (id)
+    case "UNLINK", "RMDIR":
+      store.UnlinkId(id)
+
+    // Add File Entry (id, name)
+    case "CREATE", "MKDIR":
+      dir := c_type == "MKDIR"
+      name := state_change.Name
+      mode := state_change.Mode
+      parent := state_change.Parent
+
+      entry := &filestore.MetaEntry{
+        Id: id,
+        Name: name,
+        Mode: mode,
+        Dir: dir,
+        Parent: parent,
+        Created: time.Now().UnixNano(),
+        Accessed: time.Now().UnixNano(),
+        Modified: time.Now().UnixNano(),
+        Remote: true,
+        RemoteHost: sender,
+        Version: 0,
+        Owner: user,
+      }
+
+      store.Remote[sender].Add(entry)
+
+    // Rename File Entry (id, name)
+    case "RENAME":
+      name := state_change.Name
+      // parent := state_change.Parent
+      store.Rename(id, name)
+
+    // Resize File Entry (id, size)
+    case "TRUNCATE", "APPEND", "WRITE":
+      size := state_change.Size
+      latest := store.LatestId(id)
+      latest.Size = size
+  }
+}
+
 func create_server() {
   mux := http.NewServeMux()
   mux.HandleFunc("/api/read", Read) // Exposed On Socket
@@ -889,6 +1079,7 @@ func create_server() {
   rmdir_chan := make(chan * inc.INCMessage)
   truncate_chan := make(chan * inc.INCMessage)
   utimens_chan := make(chan * inc.INCMessage)
+  state_change_chan := make(chan * inc.INCMessage)
 
   // Can Request Across Other Nodes
   router.On("READ", read_chan)
@@ -912,6 +1103,9 @@ func create_server() {
 
   //Init
   router.On("CONNECTLIST", connectlist_chan)
+
+  router.On("STATECHANGE", state_change_chan)
+
   router.OnConnect(node_connected)
 
   router.BootstrapNodes(bootstrap)
@@ -946,6 +1140,8 @@ func create_server() {
         go ws_truncate(msg)
       case msg := <- utimens_chan:
         go ws_utimens(msg)
+      case msg := <- state_change_chan:
+        go state_change(msg)
     }
   }
 }

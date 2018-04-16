@@ -26,6 +26,10 @@ const (
 var upgrader = websocket.Upgrader{
   ReadBufferSize:  1024,
   WriteBufferSize: 1024,
+  // https://www.reddit.com/r/golang/comments/2j0v46/the_origin_not_allowed_error/
+  CheckOrigin: func(r *http.Request) bool {
+    return true // Necessary to allow browser-like clients to connect
+  },
 }
 
 type INCMessage struct {
@@ -357,6 +361,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   conn, err := upgrader.Upgrade(w, req, nil)
 
   if err != nil {
+    fmt.Println(err)
     return
   }
 
@@ -365,14 +370,21 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   t, m, err := conn.ReadMessage()
 
   if t != MESSAGE_TYPE || err != nil {
+    fmt.Println(err)
+    conn.Close()
     return
   }
 
+  stringed := []byte(string(m))
+
+  fmt.Println(m, "\n", stringed)
+
   // fmt.Println(m)
 
-  parsed := ParseMessage(m)
+  parsed := ParseMessage(stringed)
 
   if parsed.Type != "HELLO" {
+    fmt.Printf("Unexpected Incoming Type '%s'\n", parsed.Type)
     return
   }
 
@@ -381,6 +393,7 @@ func (this * INCRouter) HandleIncoming(w http.ResponseWriter, req * http.Request
   err = json.Unmarshal(parsed.Message, &chello)
 
   if err != nil {
+    fmt.Println(err)
     return
   }
 
@@ -483,6 +496,7 @@ func (this * INCRouter) HandleMessages() {
 }
 
 func ParseMessage(msg []byte) *INCMessage {
+  fmt.Println(string(msg))
   var message INCMessage
   err := json.Unmarshal(msg, &message)
 
