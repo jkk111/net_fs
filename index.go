@@ -891,6 +891,8 @@ func ws_read(m * inc.INCMessage) {
 
   file := store.LatestName(user, name)
 
+  fmt.Printf("%+v\n", file)
+
   if file == nil {
     fmt.Printf("%+v\n", request)
     // panic("This Shouldn't Happen")
