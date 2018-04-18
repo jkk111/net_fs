@@ -292,7 +292,7 @@ func (this * FileStore) Serialize() []byte {
   entries = append(entries, this.Entries.Entries...)
 
   for _, remote := range this.Remote {
-    for _, entry := remote.Entries {
+    for _, entry := range remote.Entries {
       unique := true
 
       for _, existing := range entries {
