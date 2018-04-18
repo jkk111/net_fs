@@ -891,7 +891,8 @@ func ws_read(m * inc.INCMessage) {
 
   file := store.LatestName(user, name)
 
-  fmt.Printf("%+v\n", file)
+  fmt.Printf("File: %+v\n", file)
+  fmt.Printf("Request: %+v\n", request)
 
   if file == nil {
     fmt.Printf("%+v\n", request)
