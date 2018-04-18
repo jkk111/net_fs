@@ -287,7 +287,33 @@ func (this * FileStore) Close() {
 }
 
 func (this * FileStore) Serialize() []byte {
-  buf, err := json.Marshal(this.Entries.Entries)
+  entries := make([]*MetaEntry, 0)
+
+  entries = append(entries, this.Entries.Entries...)
+
+  for _, remote := range this.Remote {
+    for _, entry := remote.Entries {
+      unique := true
+
+      for _, existing := range entries {
+        if existing.Id == entry.Id {
+          unique = false
+
+
+          if entry.Version > existing.Version {
+            existing.Version = entry.Version
+          }
+
+        }
+      }
+
+      if unique {
+        entries = append(entries, entry)
+      }
+    }
+  }
+
+  buf, err := json.Marshal(entries)
   if err != nil {
     panic(err)
   }
