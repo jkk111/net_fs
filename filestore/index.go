@@ -664,7 +664,8 @@ func (this * FileStore) Readdir(user string, name string) (*Error, []string) {
 
   names := make([]string, base_index)
 
-  for i, item := range de_duped {
+  for i, item := range de_duped[:base_index] {
+    fmt.Println(item)
     index := strings.LastIndex(item.Name, "/")
     names[i] = item.Name[index + 1:]
   }
