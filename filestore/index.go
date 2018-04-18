@@ -181,7 +181,7 @@ type MetaEntry struct {
   Created int64 `json:"created"`
   Modified int64 `json:"modified"`
   Chunks []int64 `json:"chunks"`
-  Owner string
+  Owner string `json:"owner"`
   Version int64 `json:"version"`
   Remote bool
   RemoteHost string

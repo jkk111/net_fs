@@ -893,7 +893,11 @@ func ws_read(m * inc.INCMessage) {
 
   if file == nil {
     fmt.Printf("%+v\n", request)
-    panic("This Shouldn't Happen")
+    // panic("This Shouldn't Happen")
+    msg := inc.NewINCMessage("READ_RESPONSE", false, ENOENT)
+    msg.Rid = m.Mid
+    router.Send(string(m.Id), msg)
+    return
   }
 
   offset := request.Offset
