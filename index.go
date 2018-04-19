@@ -1009,6 +1009,8 @@ func state_change(m * inc.INCMessage) {
   user := state_change.User
   c_type := state_change.Type
 
+  store.CreateUser(user)
+
   switch c_type {
     // Remove File Entry (id)
     case "UNLINK", "RMDIR":
