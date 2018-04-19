@@ -687,6 +687,16 @@ func (this * FileStore) CreateUser(user string) {
     }
   }
 
+  for _, remote := range this.Remote {
+    if remote.Users[user] == nil {
+      remote.Users[user] = &UserEntries{
+        make(map[string]*MetaEntry),
+        make(map[string]*MetaEntry),
+        make(map[string][]*MetaEntry),
+      }
+    }
+  }
+
   this.CreateFile(user, "/", 16822, true)
   this.CreateFile(user, "Keyring", 33206, false)
 }
