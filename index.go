@@ -695,6 +695,11 @@ func Truncate( w http.ResponseWriter, req * http.Request) {
 
   file := store.LatestName(user, name)
 
+  if file == nil {
+    w.Write(ENOENT)
+    return
+  }
+
   if file.Remote {
     remote_truncate(file.RemoteHost, request)
   } else {
@@ -769,6 +774,7 @@ func Append(w http.ResponseWriter, req * http.Request) {
 
   if file == nil {
     w.Write(ENOENT)
+    return
   }
 
 
